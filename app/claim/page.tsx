@@ -139,9 +139,12 @@ export default function ClaimPage() {
             </motion.form>
           )}
 
-          <div className="text-center pt-2 border-t border-border-main">
-            <a href="/onboarding" className="text-sm text-accent-blue hover:underline">
+          <div className="text-center pt-2 border-t border-border-main space-y-2">
+            <a href="/onboarding" className="text-sm text-accent-blue hover:underline block">
               I&apos;m new here — create a fresh account
+            </a>
+            <a href="/onboarding" className="text-sm text-text-secondary hover:underline block">
+              &larr; Back to onboarding
             </a>
           </div>
         </div>

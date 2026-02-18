@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
+import BackButton from '@/components/BackButton';
 
 interface UserProfileData {
   id: string;
@@ -90,7 +91,8 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen">
       <Navbar user={session?.user || null} />
-      <div className="max-w-2xl mx-auto px-4 pt-24 pb-8">
+      <div className="max-w-2xl mx-auto px-4 pt-24 pb-8 space-y-4">
+        <BackButton label="Back" />
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

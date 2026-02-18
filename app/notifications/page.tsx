@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
+import BackButton from '@/components/BackButton';
 
 interface NotificationItem {
   id: string;
@@ -72,6 +73,7 @@ export default function NotificationsPage() {
     <div className="min-h-screen">
       <Navbar user={session?.user || null} />
       <div className="max-w-2xl mx-auto px-4 pt-24 pb-8 space-y-4">
+        <BackButton href="/" label="Dashboard" />
         <h1 className="text-2xl font-bold text-text-primary">Notifications</h1>
 
         {loading ? (

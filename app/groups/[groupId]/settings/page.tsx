@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useParams, useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
+import BackButton from '@/components/BackButton';
 import UserSearch from '@/components/UserSearch';
 
 export default function GroupSettings() {
@@ -78,6 +79,7 @@ export default function GroupSettings() {
     <div className="min-h-screen">
       <Navbar user={session?.user || null} />
       <div className="max-w-lg mx-auto px-4 pt-24 pb-8 space-y-6">
+        <BackButton href={`/groups/${groupId}`} label={group?.name || 'Back to Group'} />
         <h1 className="text-2xl font-bold text-text-primary">Group Settings</h1>
 
         {/* Name */}

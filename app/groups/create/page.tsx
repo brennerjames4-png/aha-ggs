@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
+import BackButton from '@/components/BackButton';
 import UserSearch from '@/components/UserSearch';
 
 interface InviteUser {
@@ -63,8 +64,9 @@ export default function CreateGroupPage() {
   return (
     <div className="min-h-screen">
       <Navbar user={session?.user || null} />
-      <div className="max-w-lg mx-auto px-4 pt-24 pb-8">
-        <h1 className="text-2xl font-bold text-text-primary mb-6">Create a Group</h1>
+      <div className="max-w-lg mx-auto px-4 pt-24 pb-8 space-y-6">
+        <BackButton href="/groups" label="Groups" />
+        <h1 className="text-2xl font-bold text-text-primary">Create a Group</h1>
 
         <form onSubmit={handleCreate} className="glass-card p-6 space-y-5">
           <div>

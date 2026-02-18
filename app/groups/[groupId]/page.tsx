@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
+import BackButton from '@/components/BackButton';
 import ScoreCard from '@/components/ScoreCard';
 import WeeklyBoard from '@/components/WeeklyBoard';
 import SubmissionStatus from '@/components/SubmissionStatus';
@@ -90,6 +91,7 @@ export default function GroupDashboard() {
       <ConfettiEffect trigger={showConfetti} />
 
       <div className="max-w-4xl mx-auto px-4 pt-24 pb-8 space-y-6">
+        <BackButton href="/groups" label="All Groups" />
         {/* Group header */}
         <div className="flex items-center justify-between">
           <div>

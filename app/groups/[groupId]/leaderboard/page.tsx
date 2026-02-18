@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
+import BackButton from '@/components/BackButton';
 import WeeklyBoard from '@/components/WeeklyBoard';
 import { getMemberColor } from '@/lib/colors';
 
@@ -60,6 +61,7 @@ export default function GroupLeaderboard() {
     <div className="min-h-screen">
       <Navbar user={session?.user || null} />
       <div className="max-w-3xl mx-auto px-4 pt-24 pb-8 space-y-6">
+        <BackButton href={`/groups/${groupId}`} label={group?.name || 'Back to Group'} />
         <h1 className="text-2xl font-bold text-text-primary">
           {group?.name || 'Group'} — Leaderboard
         </h1>
