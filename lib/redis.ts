@@ -6,13 +6,23 @@ import {
   ClaimCode, MemberInfo, LEGACY_IDS,
 } from './types';
 
-// === Redis Client ===
+// === Singleton Redis Client ===
+
+let _redis: Redis | null = null;
 
 function getRedis(): Redis {
-  return new Redis({
-    url: process.env.KV_REST_API_URL!,
-    token: process.env.KV_REST_API_TOKEN!,
-  });
+  if (!_redis) {
+    _redis = new Redis({
+      url: process.env.KV_REST_API_URL!,
+      token: process.env.KV_REST_API_TOKEN!,
+    });
+  }
+  return _redis;
+}
+
+function parseJson<T>(data: unknown): T | null {
+  if (!data) return null;
+  return typeof data === 'string' ? JSON.parse(data) : data as unknown as T;
 }
 
 function generateId(prefix: string): string {
@@ -34,11 +44,9 @@ export async function createUser(profile: UserProfile): Promise<void> {
   pipeline.set(`user:${profile.id}`, JSON.stringify(profile));
   pipeline.set(`user:google:${profile.googleId}`, profile.id);
   pipeline.set(`user:username:${profile.username.toLowerCase()}`, profile.id);
-  // Add groups
   for (const gid of profile.groups) {
     pipeline.sadd(`user:groups:${profile.id}`, gid);
   }
-  // Add friends
   for (const fid of profile.friends) {
     pipeline.sadd(`friends:${profile.id}`, fid);
   }
@@ -48,8 +56,7 @@ export async function createUser(profile: UserProfile): Promise<void> {
 export async function getUser(userId: UserId): Promise<UserProfile | null> {
   const redis = getRedis();
   const data = await redis.get<string>(`user:${userId}`);
-  if (!data) return null;
-  return typeof data === 'string' ? JSON.parse(data) : data as unknown as UserProfile;
+  return parseJson<UserProfile>(data);
 }
 
 export async function getUserByGoogleId(googleId: string): Promise<UserProfile | null> {
@@ -72,7 +79,6 @@ export async function updateUser(userId: UserId, updates: Partial<UserProfile>):
 
   const redis = getRedis();
 
-  // If username changed, update the mapping
   if (updates.username && updates.username !== user.username) {
     const pipeline = redis.pipeline();
     pipeline.del(`user:username:${user.username.toLowerCase()}`);
@@ -86,8 +92,6 @@ export async function updateUser(userId: UserId, updates: Partial<UserProfile>):
 }
 
 export async function searchUsers(query: string, limit = 10): Promise<UserProfile[]> {
-  // Simple approach: scan user keys and filter by username/displayName
-  // For production, consider a secondary index or search service
   const redis = getRedis();
   const results: UserProfile[] = [];
   const lowerQ = query.toLowerCase();
@@ -97,27 +101,39 @@ export async function searchUsers(query: string, limit = 10): Promise<UserProfil
     const [nextCursor, keys] = await redis.scan(cursor, { match: 'user:usr_*', count: 100 });
     cursor = typeof nextCursor === 'string' ? parseInt(nextCursor) : nextCursor;
 
-    for (const key of keys) {
-      if (results.length >= limit) break;
-      // Skip mapping keys
-      if (key.includes(':google:') || key.includes(':username:') || key.includes(':groups:') || key.includes(':scores:')) continue;
-      const data = await redis.get<string>(key);
-      if (!data) continue;
-      const user: UserProfile = typeof data === 'string' ? JSON.parse(data) : data as unknown as UserProfile;
-      if (
-        user.username.toLowerCase().includes(lowerQ) ||
-        user.displayName.toLowerCase().includes(lowerQ)
-      ) {
-        results.push(user);
+    // Pipeline all gets for this batch
+    const profileKeys = keys.filter((k: string) =>
+      !k.includes(':google:') && !k.includes(':username:') && !k.includes(':groups:') && !k.includes(':scores:')
+    );
+    if (profileKeys.length > 0) {
+      const pipeline = redis.pipeline();
+      for (const key of profileKeys) {
+        pipeline.get(key);
+      }
+      const batchResults = await pipeline.exec();
+      for (const data of batchResults) {
+        if (results.length >= limit) break;
+        const user = parseJson<UserProfile>(data);
+        if (user && (
+          user.username.toLowerCase().includes(lowerQ) ||
+          user.displayName.toLowerCase().includes(lowerQ)
+        )) {
+          results.push(user);
+        }
       }
     }
   } while (cursor !== 0 && results.length < limit);
 
   // Also search legacy users
   if (results.length < limit) {
+    const pipeline = redis.pipeline();
     for (const legacyId of LEGACY_IDS) {
+      pipeline.get(`user:${legacyId}`);
+    }
+    const legacyResults = await pipeline.exec();
+    for (const data of legacyResults) {
       if (results.length >= limit) break;
-      const user = await getUser(legacyId);
+      const user = parseJson<UserProfile>(data);
       if (user && !results.find(r => r.id === user.id)) {
         if (
           user.username.toLowerCase().includes(lowerQ) ||
@@ -147,13 +163,11 @@ export async function submitDailyScore(
   date: string,
   rounds: [number, number, number]
 ): Promise<{ success: boolean; error?: string }> {
-  // Check if already submitted
   const existing = await getDailyScore(userId, date);
   if (existing?.submitted) {
     return { success: false, error: 'You have already submitted scores for today.' };
   }
 
-  // Validate rounds
   for (const score of rounds) {
     if (!Number.isInteger(score) || score < 0 || score > 5000) {
       return { success: false, error: 'Each round score must be an integer between 0 and 5000.' };
@@ -181,16 +195,14 @@ export async function submitDailyScore(
 export async function getDailyScore(userId: UserId, date: string): Promise<DailyScore | null> {
   const redis = getRedis();
   const data = await redis.get<string>(`scores:${userId}:${date}`);
-  if (!data) return null;
-  return typeof data === 'string' ? JSON.parse(data) : data as unknown as DailyScore;
+  return parseJson<DailyScore>(data);
 }
 
 export async function getScoresForDate(date: string, memberIds: UserId[]): Promise<Record<string, DailyScore | null>> {
-  const redis = getRedis();
   const scores: Record<string, DailyScore | null> = {};
-
   if (memberIds.length === 0) return scores;
 
+  const redis = getRedis();
   const pipeline = redis.pipeline();
   for (const id of memberIds) {
     pipeline.get(`scores:${id}:${date}`);
@@ -198,21 +210,97 @@ export async function getScoresForDate(date: string, memberIds: UserId[]): Promi
   const results = await pipeline.exec();
 
   memberIds.forEach((id, i) => {
-    const data = results[i];
-    if (data) {
-      scores[id] = typeof data === 'string' ? JSON.parse(data) : data as unknown as DailyScore;
-    } else {
-      scores[id] = null;
-    }
+    scores[id] = parseJson<DailyScore>(results[i]);
   });
 
   return scores;
+}
+
+/**
+ * Batch fetch scores for multiple dates + members in a single pipeline.
+ * Returns a map of date -> { memberId -> DailyScore | null }
+ */
+export async function getScoresForDates(
+  dates: string[],
+  memberIds: UserId[]
+): Promise<Record<string, Record<string, DailyScore | null>>> {
+  if (dates.length === 0 || memberIds.length === 0) return {};
+
+  const redis = getRedis();
+  const pipeline = redis.pipeline();
+  const keys: { date: string; memberId: UserId }[] = [];
+
+  for (const date of dates) {
+    for (const id of memberIds) {
+      pipeline.get(`scores:${id}:${date}`);
+      keys.push({ date, memberId: id });
+    }
+  }
+
+  const results = await pipeline.exec();
+  const out: Record<string, Record<string, DailyScore | null>> = {};
+
+  for (const date of dates) {
+    out[date] = {};
+  }
+
+  keys.forEach(({ date, memberId }, i) => {
+    out[date][memberId] = parseJson<DailyScore>(results[i]);
+  });
+
+  return out;
+}
+
+/**
+ * Batch check reveal status for multiple dates given a group's members.
+ * Returns a map of date -> boolean.
+ */
+export async function checkGroupRevealBatch(
+  members: UserId[],
+  dates: string[]
+): Promise<Record<string, boolean>> {
+  if (dates.length === 0) return {};
+
+  const redis = getRedis();
+  const pipeline = redis.pipeline();
+  for (const date of dates) {
+    pipeline.smembers(`submissions:${date}`);
+  }
+  const results = await pipeline.exec();
+
+  const out: Record<string, boolean> = {};
+  dates.forEach((date, i) => {
+    const submitters = new Set(results[i] as string[]);
+    out[date] = members.every(m => submitters.has(m));
+  });
+
+  return out;
 }
 
 export async function getAllScoreDates(userId: UserId): Promise<string[]> {
   const redis = getRedis();
   const dates = await redis.smembers(`user:scores:dates:${userId}`);
   return (dates as string[]).sort();
+}
+
+/**
+ * Batch fetch all score dates for multiple users in a single pipeline.
+ */
+export async function getAllScoreDatesBatch(userIds: UserId[]): Promise<Record<string, string[]>> {
+  if (userIds.length === 0) return {};
+
+  const redis = getRedis();
+  const pipeline = redis.pipeline();
+  for (const id of userIds) {
+    pipeline.smembers(`user:scores:dates:${id}`);
+  }
+  const results = await pipeline.exec();
+
+  const out: Record<string, string[]> = {};
+  userIds.forEach((id, i) => {
+    out[id] = ((results[i] || []) as string[]).sort();
+  });
+  return out;
 }
 
 // ============================================================
@@ -252,8 +340,7 @@ export async function createGroup(
 export async function getGroup(groupId: GroupId): Promise<Group | null> {
   const redis = getRedis();
   const data = await redis.get<string>(`group:${groupId}`);
-  if (!data) return null;
-  return typeof data === 'string' ? JSON.parse(data) : data as unknown as Group;
+  return parseJson<Group>(data);
 }
 
 export async function updateGroup(groupId: GroupId, updates: Partial<Group>): Promise<Group | null> {
@@ -271,9 +358,16 @@ export async function getUserGroups(userId: UserId): Promise<Group[]> {
   const groupIds = await redis.smembers(`user:groups:${userId}`);
   if (!groupIds || groupIds.length === 0) return [];
 
-  const groups: Group[] = [];
+  // Pipeline all group fetches
+  const pipeline = redis.pipeline();
   for (const gid of groupIds) {
-    const group = await getGroup(gid as GroupId);
+    pipeline.get(`group:${gid}`);
+  }
+  const results = await pipeline.exec();
+
+  const groups: Group[] = [];
+  for (const data of results) {
+    const group = parseJson<Group>(data);
     if (group) groups.push(group);
   }
   return groups;
@@ -322,7 +416,6 @@ export async function deleteGroup(groupId: GroupId): Promise<boolean> {
   return true;
 }
 
-// Check if all members of a group have submitted for a given date
 export async function checkGroupReveal(groupId: GroupId, date: string): Promise<boolean> {
   const group = await getGroup(groupId);
   if (!group) return false;
@@ -349,18 +442,23 @@ export async function addFriend(userId1: UserId, userId2: UserId): Promise<void>
   const pipeline = redis.pipeline();
   pipeline.sadd(`friends:${userId1}`, userId2);
   pipeline.sadd(`friends:${userId2}`, userId1);
-  await pipeline.exec();
+  pipeline.get(`user:${userId1}`);
+  pipeline.get(`user:${userId2}`);
+  const results = await pipeline.exec();
 
-  // Also update user profiles
-  const [user1, user2] = await Promise.all([getUser(userId1), getUser(userId2)]);
+  const user1 = parseJson<UserProfile>(results[2]);
+  const user2 = parseJson<UserProfile>(results[3]);
+
+  const updatePipeline = redis.pipeline();
   if (user1 && !user1.friends.includes(userId2)) {
     user1.friends.push(userId2);
-    await getRedis().set(`user:${userId1}`, JSON.stringify(user1));
+    updatePipeline.set(`user:${userId1}`, JSON.stringify(user1));
   }
   if (user2 && !user2.friends.includes(userId1)) {
     user2.friends.push(userId1);
-    await getRedis().set(`user:${userId2}`, JSON.stringify(user2));
+    updatePipeline.set(`user:${userId2}`, JSON.stringify(user2));
   }
+  await updatePipeline.exec();
 }
 
 export async function removeFriend(userId1: UserId, userId2: UserId): Promise<void> {
@@ -368,17 +466,23 @@ export async function removeFriend(userId1: UserId, userId2: UserId): Promise<vo
   const pipeline = redis.pipeline();
   pipeline.srem(`friends:${userId1}`, userId2);
   pipeline.srem(`friends:${userId2}`, userId1);
-  await pipeline.exec();
+  pipeline.get(`user:${userId1}`);
+  pipeline.get(`user:${userId2}`);
+  const results = await pipeline.exec();
 
-  const [user1, user2] = await Promise.all([getUser(userId1), getUser(userId2)]);
+  const user1 = parseJson<UserProfile>(results[2]);
+  const user2 = parseJson<UserProfile>(results[3]);
+
+  const updatePipeline = redis.pipeline();
   if (user1) {
     user1.friends = user1.friends.filter(f => f !== userId2);
-    await getRedis().set(`user:${userId1}`, JSON.stringify(user1));
+    updatePipeline.set(`user:${userId1}`, JSON.stringify(user1));
   }
   if (user2) {
     user2.friends = user2.friends.filter(f => f !== userId1);
-    await getRedis().set(`user:${userId2}`, JSON.stringify(user2));
+    updatePipeline.set(`user:${userId2}`, JSON.stringify(user2));
   }
+  await updatePipeline.exec();
 }
 
 export async function areFriends(userId1: UserId, userId2: UserId): Promise<boolean> {
@@ -414,22 +518,28 @@ export async function createFriendRequest(from: UserId, to: UserId): Promise<Fri
 export async function getFriendRequest(requestId: string): Promise<FriendRequest | null> {
   const redis = getRedis();
   const data = await redis.get<string>(`friend_request:${requestId}`);
-  if (!data) return null;
-  return typeof data === 'string' ? JSON.parse(data) : data as unknown as FriendRequest;
+  return parseJson<FriendRequest>(data);
 }
 
 export async function getPendingFriendRequests(userId: UserId): Promise<FriendRequest[]> {
   const redis = getRedis();
   const ids = await redis.smembers(`friend_requests:to:${userId}`);
-  const requests: FriendRequest[] = [];
+  if (!ids || ids.length === 0) return [];
 
+  // Pipeline all request fetches
+  const pipeline = redis.pipeline();
   for (const id of ids) {
-    const req = await getFriendRequest(id as string);
+    pipeline.get(`friend_request:${id}`);
+  }
+  const results = await pipeline.exec();
+
+  const requests: FriendRequest[] = [];
+  for (const data of results) {
+    const req = parseJson<FriendRequest>(data);
     if (req && req.status === 'pending') {
       requests.push(req);
     }
   }
-
   return requests;
 }
 
@@ -444,10 +554,8 @@ export async function respondToFriendRequest(
   request.respondedAt = new Date().toISOString();
 
   const redis = getRedis();
-  await redis.set(`friend_request:${requestId}`, JSON.stringify(request));
-
-  // Remove from pending sets
   const pipeline = redis.pipeline();
+  pipeline.set(`friend_request:${requestId}`, JSON.stringify(request));
   pipeline.srem(`friend_requests:to:${request.to}`, requestId);
   pipeline.srem(`friend_requests:from:${request.from}`, requestId);
   await pipeline.exec();
@@ -491,22 +599,28 @@ export async function createGroupInvite(
 export async function getGroupInvite(inviteId: string): Promise<GroupInvite | null> {
   const redis = getRedis();
   const data = await redis.get<string>(`group_invite:${inviteId}`);
-  if (!data) return null;
-  return typeof data === 'string' ? JSON.parse(data) : data as unknown as GroupInvite;
+  return parseJson<GroupInvite>(data);
 }
 
 export async function getPendingGroupInvites(userId: UserId): Promise<GroupInvite[]> {
   const redis = getRedis();
   const ids = await redis.smembers(`group_invites:to:${userId}`);
-  const invites: GroupInvite[] = [];
+  if (!ids || ids.length === 0) return [];
 
+  // Pipeline all invite fetches
+  const pipeline = redis.pipeline();
   for (const id of ids) {
-    const inv = await getGroupInvite(id as string);
+    pipeline.get(`group_invite:${id}`);
+  }
+  const results = await pipeline.exec();
+
+  const invites: GroupInvite[] = [];
+  for (const data of results) {
+    const inv = parseJson<GroupInvite>(data);
     if (inv && inv.status === 'pending') {
       invites.push(inv);
     }
   }
-
   return invites;
 }
 
@@ -521,8 +635,10 @@ export async function respondToGroupInvite(
   invite.respondedAt = new Date().toISOString();
 
   const redis = getRedis();
-  await redis.set(`group_invite:${inviteId}`, JSON.stringify(invite));
-  await redis.srem(`group_invites:to:${invite.to}`, inviteId);
+  const pipeline = redis.pipeline();
+  pipeline.set(`group_invite:${inviteId}`, JSON.stringify(invite));
+  pipeline.srem(`group_invites:to:${invite.to}`, inviteId);
+  await pipeline.exec();
 
   if (status === 'accepted') {
     await addGroupMember(invite.groupId, invite.to);
@@ -555,10 +671,11 @@ export async function createNotification(
   };
 
   const redis = getRedis();
-  // Push to front of list, cap at 50
-  await redis.lpush(`notifications:${userId}`, JSON.stringify(notification));
-  await redis.ltrim(`notifications:${userId}`, 0, 49);
-  await redis.incr(`notifications:unread:${userId}`);
+  const pipeline = redis.pipeline();
+  pipeline.lpush(`notifications:${userId}`, JSON.stringify(notification));
+  pipeline.ltrim(`notifications:${userId}`, 0, 49);
+  pipeline.incr(`notifications:unread:${userId}`);
+  await pipeline.exec();
 
   return notification;
 }
@@ -566,9 +683,7 @@ export async function createNotification(
 export async function getNotifications(userId: UserId, limit = 20): Promise<Notification[]> {
   const redis = getRedis();
   const raw = await redis.lrange(`notifications:${userId}`, 0, limit - 1);
-  return raw.map(item =>
-    typeof item === 'string' ? JSON.parse(item) : item as unknown as Notification
-  );
+  return raw.map(item => parseJson<Notification>(item)!).filter(Boolean);
 }
 
 export async function getUnreadCount(userId: UserId): Promise<number> {
@@ -580,14 +695,10 @@ export async function getUnreadCount(userId: UserId): Promise<number> {
 export async function markAllNotificationsRead(userId: UserId): Promise<void> {
   const redis = getRedis();
 
-  // Get all notifications, mark as read, re-set
   const raw = await redis.lrange(`notifications:${userId}`, 0, -1);
   if (raw.length === 0) return;
 
-  const notifications: Notification[] = raw.map(item =>
-    typeof item === 'string' ? JSON.parse(item) : item as unknown as Notification
-  );
-
+  const notifications: Notification[] = raw.map(item => parseJson<Notification>(item)!).filter(Boolean);
   const updated = notifications.map(n => ({ ...n, read: true }));
 
   const pipeline = redis.pipeline();
@@ -606,8 +717,7 @@ export async function markAllNotificationsRead(userId: UserId): Promise<void> {
 export async function getClaimCode(code: string): Promise<ClaimCode | null> {
   const redis = getRedis();
   const data = await redis.get<string>(`claim:${code}`);
-  if (!data) return null;
-  return typeof data === 'string' ? JSON.parse(data) : data as unknown as ClaimCode;
+  return parseJson<ClaimCode>(data);
 }
 
 export async function setClaimCode(claimCode: ClaimCode): Promise<void> {
@@ -646,9 +756,18 @@ export async function setMigrationComplete(): Promise<void> {
 // ============================================================
 
 export async function getMemberInfos(memberIds: UserId[]): Promise<Record<string, MemberInfo>> {
-  const infos: Record<string, MemberInfo> = {};
+  if (memberIds.length === 0) return {};
+
+  const redis = getRedis();
+  const pipeline = redis.pipeline();
   for (const id of memberIds) {
-    const user = await getUser(id);
+    pipeline.get(`user:${id}`);
+  }
+  const results = await pipeline.exec();
+
+  const infos: Record<string, MemberInfo> = {};
+  memberIds.forEach((id, i) => {
+    const user = parseJson<UserProfile>(results[i]);
     if (user) {
       infos[id] = {
         id: user.id,
@@ -657,7 +776,7 @@ export async function getMemberInfos(memberIds: UserId[]): Promise<Record<string
         avatarUrl: user.avatarUrl,
       };
     }
-  }
+  });
   return infos;
 }
 

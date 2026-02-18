@@ -3,7 +3,8 @@ import {
 } from './types';
 import { getWeekRange, parseDate } from './dates';
 import {
-  getScoresForDate, getAllScoreDates, checkGroupReveal,
+  getScoresForDate, getScoresForDates, checkGroupRevealBatch,
+  getAllScoreDatesBatch,
 } from './redis';
 import type { GroupId } from './types';
 
@@ -13,7 +14,6 @@ export function getDailyTotal(rounds: [number, number, number]): number {
 
 /**
  * Build a DailyResult for a given date and set of member scores.
- * `revealed` is true only if ALL members have submitted.
  */
 export function buildDailyResult(
   dateKey: string,
@@ -45,7 +45,6 @@ export function buildDailyResult(
   let gdWinner: UserId | null = null;
 
   if (revealed) {
-    // Find daily winner
     const totals = memberIds
       .filter(id => scores[id]?.submitted)
       .map(id => ({ id, total: getDailyTotal(scores[id]!.rounds) }))
@@ -57,7 +56,6 @@ export function buildDailyResult(
       }
     }
 
-    // Find GD winner (best single round)
     let bestSingleRound = -1;
     const gdWinners: UserId[] = [];
     for (const id of memberIds) {
@@ -88,20 +86,25 @@ export function buildDailyResult(
 }
 
 /**
- * Get daily result for a date within a group context.
+ * Get daily result for a single date within a group context.
+ * Uses individual fetches — only for single-date queries.
  */
 export async function getDailyResultForGroup(
   dateKey: string,
   memberIds: UserId[],
   groupId: GroupId
 ): Promise<DailyResult> {
-  const scores = await getScoresForDate(dateKey, memberIds);
-  const revealed = await checkGroupReveal(groupId, dateKey);
-  return buildDailyResult(dateKey, memberIds, scores, revealed);
+  // Fetch scores and reveal in parallel
+  const [scores, revealMap] = await Promise.all([
+    getScoresForDate(dateKey, memberIds),
+    checkGroupRevealBatch(memberIds, [dateKey]),
+  ]);
+  return buildDailyResult(dateKey, memberIds, scores, revealMap[dateKey] || false);
 }
 
 /**
- * Get weekly standings for a group.
+ * Get weekly standings for a group — batch-optimized.
+ * 1 pipeline for all 7 days of scores + 1 pipeline for all 7 reveal checks.
  */
 export async function getWeeklyStandings(
   memberIds: UserId[],
@@ -125,11 +128,16 @@ export async function getWeeklyStandings(
     };
   }
 
-  for (const dateKey of weekDates) {
-    const scores = await getScoresForDate(dateKey, memberIds);
-    const revealed = await checkGroupReveal(groupId, dateKey);
-    if (!revealed) continue;
+  // Batch fetch: all scores for all dates + all reveal checks
+  const [allScores, revealMap] = await Promise.all([
+    getScoresForDates(weekDates, memberIds),
+    checkGroupRevealBatch(memberIds, weekDates),
+  ]);
 
+  for (const dateKey of weekDates) {
+    if (!revealMap[dateKey]) continue;
+
+    const scores = allScores[dateKey];
     const result = buildDailyResult(dateKey, memberIds, scores, true);
 
     if (result.winner) {
@@ -169,7 +177,8 @@ export async function getWeeklyStandings(
 }
 
 /**
- * Get all-time player stats for a group.
+ * Get all-time player stats for a group — batch-optimized.
+ * Instead of N+1 per date, does 2 pipelines total (scores + reveals).
  */
 export async function getPlayerStatsForGroup(
   memberIds: UserId[],
@@ -198,13 +207,23 @@ export async function getPlayerStatsForGroup(
     };
   }
 
-  // Collect all dates where any member has scores
+  // Batch fetch all score dates for all members (1 pipeline)
+  const allDatesByUser = await getAllScoreDatesBatch(memberIds);
   const allDatesSet = new Set<string>();
   for (const id of memberIds) {
-    const dates = await getAllScoreDates(id);
-    dates.forEach(d => allDatesSet.add(d));
+    for (const d of allDatesByUser[id] || []) {
+      allDatesSet.add(d);
+    }
   }
   const allDates = Array.from(allDatesSet).sort();
+
+  if (allDates.length === 0) return Object.values(stats);
+
+  // Batch fetch all scores + all reveals (2 pipelines)
+  const [allScores, revealMap] = await Promise.all([
+    getScoresForDates(allDates, memberIds),
+    checkGroupRevealBatch(memberIds, allDates),
+  ]);
 
   const currentStreaks: Record<string, number> = {};
   const bestStreaks: Record<string, number> = {};
@@ -213,17 +232,13 @@ export async function getPlayerStatsForGroup(
     bestStreaks[id] = 0;
   }
 
-  const processedWeeks = new Set<string>();
-  const weekWins: Record<string, number> = {};
-  for (const id of memberIds) {
-    weekWins[id] = 0;
-  }
+  // Track weeks for week-winner computation
+  const weekDatesMap = new Map<string, string[]>(); // weekStart -> dates in that week
 
   for (const dateKey of allDates) {
-    const scores = await getScoresForDate(dateKey, memberIds);
-    const revealed = await checkGroupReveal(groupId, dateKey);
-    if (!revealed) continue;
+    if (!revealMap[dateKey]) continue;
 
+    const scores = allScores[dateKey];
     const result = buildDailyResult(dateKey, memberIds, scores, true);
 
     for (const id of memberIds) {
@@ -255,13 +270,56 @@ export async function getPlayerStatsForGroup(
       }
     }
 
+    // Group dates by week for week-winner calc
     const week = getWeekRange(parseDate(dateKey));
-    if (!processedWeeks.has(week.start)) {
-      processedWeeks.add(week.start);
-      const weekStandings = await getWeeklyStandings(memberIds, week.dates, groupId, profileMap);
-      const weekWinner = weekStandings.find(s => s.isWeekWinner);
-      if (weekWinner) {
-        weekWins[weekWinner.userId]++;
+    if (!weekDatesMap.has(week.start)) {
+      weekDatesMap.set(week.start, []);
+    }
+    weekDatesMap.get(week.start)!.push(dateKey);
+  }
+
+  // Compute week winners using already-fetched data (no more Redis calls!)
+  const weekWins: Record<string, number> = {};
+  for (const id of memberIds) {
+    weekWins[id] = 0;
+  }
+
+  for (const [, weekDates] of weekDatesMap) {
+    // Compute standings for this week from cached data
+    const weekStandings: Record<string, { daysWon: number; gdPoints: number; totalPoints: number }> = {};
+    for (const id of memberIds) {
+      weekStandings[id] = { daysWon: 0, gdPoints: 0, totalPoints: 0 };
+    }
+
+    for (const dateKey of weekDates) {
+      if (!revealMap[dateKey]) continue;
+      const scores = allScores[dateKey];
+      const result = buildDailyResult(dateKey, memberIds, scores, true);
+
+      if (result.winner) weekStandings[result.winner].daysWon++;
+      if (result.gdWinner) weekStandings[result.gdWinner].gdPoints++;
+
+      for (const id of memberIds) {
+        const score = scores[id];
+        if (score?.submitted) {
+          weekStandings[id].totalPoints += getDailyTotal(score.rounds);
+        }
+      }
+    }
+
+    const sorted = Object.entries(weekStandings).sort(([, a], [, b]) => {
+      if (b.daysWon !== a.daysWon) return b.daysWon - a.daysWon;
+      if (b.gdPoints !== a.gdPoints) return b.gdPoints - a.gdPoints;
+      return b.totalPoints - a.totalPoints;
+    });
+
+    if (sorted.length > 0 && sorted[0][1].daysWon > 0) {
+      const isUnique = sorted.length === 1 ||
+        sorted[0][1].daysWon > sorted[1][1].daysWon ||
+        (sorted[0][1].daysWon === sorted[1][1].daysWon && sorted[0][1].gdPoints > sorted[1][1].gdPoints) ||
+        (sorted[0][1].daysWon === sorted[1][1].daysWon && sorted[0][1].gdPoints === sorted[1][1].gdPoints && sorted[0][1].totalPoints > sorted[1][1].totalPoints);
+      if (isUnique) {
+        weekWins[sorted[0][0]]++;
       }
     }
   }

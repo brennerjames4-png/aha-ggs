@@ -70,31 +70,17 @@ export default function Dashboard() {
     async function loadGroupData() {
       setLoading(true);
       try {
-        const [scoresRes, statsRes, groupRes] = await Promise.all([
-          fetch(`/api/groups/${selectedGroupId}/scores`),
-          fetch(`/api/groups/${selectedGroupId}/stats`),
-          fetch(`/api/groups/${selectedGroupId}`),
-        ]);
-
-        if (groupRes.ok) {
-          const gData = await groupRes.json();
-          setMemberInfos(gData.memberInfos);
-        }
-
-        if (scoresRes.ok) {
-          const sData = await scoresRes.json();
-          setTodayResult(sData.result);
-          setMyScore(sData.myScore);
-          if (sData.memberInfos) setMemberInfos((prev: any) => ({ ...prev, ...sData.memberInfos }));
-          if (sData.result?.revealed && sData.result?.winner === session?.user?.id) {
+        const res = await fetch(`/api/groups/${selectedGroupId}/dashboard`);
+        if (res.ok) {
+          const data = await res.json();
+          setMemberInfos(data.memberInfos);
+          setTodayResult(data.result);
+          setMyScore(data.myScore);
+          setWeekStandings(data.currentWeek?.standings);
+          setAllTimeStats(data.allTimeStats || []);
+          if (data.result?.revealed && data.result?.winner === session?.user?.id) {
             setShowConfetti(true);
           }
-        }
-
-        if (statsRes.ok) {
-          const stData = await statsRes.json();
-          setWeekStandings(stData.currentWeek?.standings);
-          setAllTimeStats(stData.allTimeStats || []);
         }
       } catch {
         // ignore
