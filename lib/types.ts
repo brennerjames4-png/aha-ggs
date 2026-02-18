@@ -1,37 +1,148 @@
-export type Username = 'james' | 'tyler' | 'david';
+// === ID Types ===
+export type UserId = `usr_${string}` | `legacy_${string}`;
+export type GroupId = `grp_${string}`;
 
-export const PLAYERS: Username[] = ['james', 'tyler', 'david'];
+// === User Types ===
+export type UserType = 'legacy' | 'normal';
 
-export const DISPLAY_NAMES: Record<Username, string> = {
-  james: 'James',
-  tyler: 'Tyler',
-  david: 'David',
+export interface UserProfile {
+  id: UserId;
+  googleId: string;
+  displayName: string;
+  username: string;
+  avatarUrl: string | null;
+  email: string;
+  type: UserType;
+  claimed: boolean;
+  createdAt: string; // ISO date
+  friends: UserId[];
+  groups: GroupId[];
+}
+
+// === Legacy Mappings ===
+// Old hardcoded usernames -> new usernames
+export const LEGACY_TO_USERNAME: Record<string, string> = {
+  james: 'jimbo',
+  tyler: 'tbone',
+  david: 'thewizard',
 };
 
-export const PLAYER_COLORS: Record<Username, string> = {
-  james: '#10B981',  // emerald
-  tyler: '#3B82F6',  // blue
-  david: '#F59E0B',  // amber
+// Old hardcoded usernames -> legacy user IDs
+export const LEGACY_TO_ID: Record<string, UserId> = {
+  james: 'legacy_james',
+  tyler: 'legacy_tyler',
+  david: 'legacy_david',
 };
 
-export interface PlayerDayData {
+export const LEGACY_DISPLAY_NAMES: Record<UserId, string> = {
+  legacy_james: 'James',
+  legacy_tyler: 'Tyler',
+  legacy_david: 'David',
+} as Record<UserId, string>;
+
+export const LEGACY_IDS: UserId[] = ['legacy_james', 'legacy_tyler', 'legacy_david'];
+
+export const RESERVED_USERNAMES = new Set([
+  'jimbo', 'tbone', 'thewizard',
+  'james', 'tyler', 'david',
+  'admin', 'mod', 'system', 'aha', 'ahaggs',
+  'api', 'login', 'logout', 'settings', 'profile',
+  'groups', 'friends', 'notifications', 'onboarding', 'claim',
+]);
+
+// === Group Types ===
+export interface GroupSettings {
+  revealMode: 'all_submitted'; // only mode for now: reveal when all members submit
+}
+
+export interface Group {
+  id: GroupId;
+  name: string;
+  createdBy: UserId;
+  admins: UserId[];
+  members: UserId[];
+  settings: GroupSettings;
+  isOriginal: boolean; // true for the OG group
+  createdAt: string; // ISO date
+}
+
+// === Score Types ===
+export interface DailyScore {
+  userId: UserId;
+  date: string; // YYYY-MM-DD
   rounds: [number, number, number];
   submitted: boolean;
+  submittedAt: string; // ISO date
 }
 
-export interface DayData {
-  james: PlayerDayData | null;
-  tyler: PlayerDayData | null;
-  david: PlayerDayData | null;
-  revealed: boolean;
+// === Friend System ===
+export type FriendRequestStatus = 'pending' | 'accepted' | 'declined';
+
+export interface FriendRequest {
+  id: string;
+  from: UserId;
+  to: UserId;
+  status: FriendRequestStatus;
+  createdAt: string;
+  respondedAt: string | null;
 }
 
-export interface GameData {
-  days: Record<string, DayData>;
+// === Group Invites ===
+export type GroupInviteStatus = 'pending' | 'accepted' | 'declined';
+
+export interface GroupInvite {
+  id: string;
+  groupId: GroupId;
+  from: UserId;
+  to: UserId;
+  status: GroupInviteStatus;
+  createdAt: string;
+  respondedAt: string | null;
+}
+
+// === Notifications ===
+export type NotificationType =
+  | 'friend_request'
+  | 'friend_accepted'
+  | 'group_invite'
+  | 'scores_revealed'
+  | 'legacy_claimed';
+
+export interface Notification {
+  id: string;
+  userId: UserId;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data: Record<string, string>; // contextual payload (groupId, fromUserId, etc.)
+  read: boolean;
+  createdAt: string;
+}
+
+// === Claim Codes ===
+export interface ClaimCode {
+  code: string;
+  legacyId: UserId;
+  legacyUsername: string; // 'james' | 'tyler' | 'david'
+  claimed: boolean;
+  claimedBy: UserId | null;
+  claimedAt: string | null;
+}
+
+// === Computed / View Types (used by scoring + UI) ===
+
+export interface MemberInfo {
+  id: UserId;
+  displayName: string;
+  username: string;
+  avatarUrl: string | null;
 }
 
 export interface WeeklyStanding {
-  player: Username;
+  userId: UserId;
+  displayName: string;
+  username: string;
+  avatarUrl: string | null;
   daysWon: number;
   gdPoints: number;
   totalPoints: number;
@@ -40,15 +151,18 @@ export interface WeeklyStanding {
 
 export interface DailyResult {
   date: string;
-  scores: Record<Username, { rounds: [number, number, number]; total: number } | null>;
-  winner: Username | null;
-  gdWinner: Username | null;
+  scores: Record<string, { rounds: [number, number, number]; total: number } | null>; // keyed by UserId
+  winner: UserId | null;
+  gdWinner: UserId | null;
   revealed: boolean;
   submittedCount: number;
+  totalMembers: number;
 }
 
 export interface PlayerStats {
-  player: Username;
+  userId: UserId;
+  displayName: string;
+  username: string;
   totalPoints: number;
   gamesPlayed: number;
   averageDaily: number;

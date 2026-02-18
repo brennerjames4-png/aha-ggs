@@ -1,30 +1,47 @@
+import { auth } from '@/lib/auth';
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
-  const token = request.cookies.get('aha-token')?.value;
-  const isLoginPage = request.nextUrl.pathname === '/login';
-  const isApiAuth = request.nextUrl.pathname.startsWith('/api/auth');
+export default auth((req) => {
+  const { pathname } = req.nextUrl;
+  const isLoggedIn = !!req.auth;
+  const isOnboarded = req.auth?.user?.onboarded;
 
-  // Allow login page and auth API without token
-  if (isLoginPage || isApiAuth) {
-    if (isLoginPage && token) {
-      // Already logged in, redirect to dashboard
-      return NextResponse.redirect(new URL('/', request.url));
+  // Public paths — always accessible
+  const isPublicPath =
+    pathname === '/login' ||
+    pathname.startsWith('/api/auth');
+
+  if (isPublicPath) {
+    // If logged in and on login page, redirect to dashboard or onboarding
+    if (isLoggedIn && pathname === '/login') {
+      const dest = isOnboarded ? '/' : '/onboarding';
+      return NextResponse.redirect(new URL(dest, req.url));
     }
     return NextResponse.next();
   }
 
-  // All other pages/API routes require auth
-  if (!token) {
-    if (request.nextUrl.pathname.startsWith('/api/')) {
+  // Not logged in → redirect to login
+  if (!isLoggedIn) {
+    if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    return NextResponse.redirect(new URL('/login', request.url));
+    return NextResponse.redirect(new URL('/login', req.url));
+  }
+
+  // Logged in but not onboarded → only allow onboarding, claim, and API routes
+  if (!isOnboarded) {
+    const allowedPaths = ['/onboarding', '/claim'];
+    const isAllowed =
+      allowedPaths.some(p => pathname.startsWith(p)) ||
+      pathname.startsWith('/api/');
+
+    if (!isAllowed) {
+      return NextResponse.redirect(new URL('/onboarding', req.url));
+    }
   }
 
   return NextResponse.next();
-}
+});
 
 export const config = {
   matcher: [

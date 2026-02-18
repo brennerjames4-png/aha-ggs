@@ -1,66 +1,55 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
-import SubmissionStatus from '@/components/SubmissionStatus';
 import ConfettiEffect from '@/components/ConfettiEffect';
 import { motion } from 'framer-motion';
-import type { Username } from '@/lib/types';
 
 export default function SubmitPage() {
+  const { data: session } = useSession();
   const router = useRouter();
-  const [user, setUser] = useState<Username | null>(null);
   const [rounds, setRounds] = useState(['', '', '']);
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [revealed, setRevealed] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [status, setStatus] = useState<{
-    submitted: Username[];
-    notSubmitted: Username[];
-    revealed: boolean;
-    total: number;
-  } | null>(null);
   const [myScores, setMyScores] = useState<[number, number, number] | null>(null);
+  const [revealedGroups, setRevealedGroups] = useState<{ groupId: string; groupName: string }[]>([]);
   const [showConfetti, setShowConfetti] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Check if already submitted today
   useEffect(() => {
-    async function load() {
+    async function checkSubmission() {
       try {
-        const [authRes, todayRes] = await Promise.all([
-          fetch('/api/auth'),
-          fetch('/api/scores/today'),
-        ]);
+        const res = await fetch('/api/users/me');
+        if (!res.ok) return;
 
-        if (!authRes.ok) {
-          router.push('/login');
-          return;
-        }
-
-        const authData = await authRes.json();
-        setUser(authData.user);
-
-        if (todayRes.ok) {
-          const td = await todayRes.json();
-          setSubmitted(td.submitted);
-          setStatus(td.status);
-          setMyScores(td.myScores);
-          if (td.status.revealed) {
-            setRevealed(true);
+        // Check via the first group's scores endpoint
+        const groupsRes = await fetch('/api/groups');
+        if (!groupsRes.ok) return;
+        const { groups } = await groupsRes.json();
+        if (groups.length > 0) {
+          const scoresRes = await fetch(`/api/groups/${groups[0].id}/scores`);
+          if (scoresRes.ok) {
+            const data = await scoresRes.json();
+            if (data.myScore?.submitted) {
+              setSubmitted(true);
+              setMyScores(data.myScore.rounds);
+            }
           }
         }
-      } catch (err) {
-        console.error(err);
+      } catch {
+        // ignore
       } finally {
         setLoading(false);
       }
     }
-    load();
-  }, [router]);
+    checkSubmission();
+  }, []);
 
   function handleRoundChange(index: number, value: string) {
     const newRounds = [...rounds];
@@ -115,17 +104,10 @@ export default function SubmitPage() {
       setMyScores(valid);
       setMessage(data.message);
       setConfirming(false);
+      setRevealedGroups(data.revealedGroups || []);
 
-      if (data.revealed) {
-        setRevealed(true);
+      if (data.revealedGroups?.length > 0) {
         setShowConfetti(true);
-      }
-
-      // Refresh status
-      const todayRes = await fetch('/api/scores/today');
-      if (todayRes.ok) {
-        const td = await todayRes.json();
-        setStatus(td.status);
       }
     } catch {
       setError('Failed to submit. Please try again.');
@@ -134,7 +116,10 @@ export default function SubmitPage() {
     }
   }
 
-  if (loading || !user) {
+  const user = session?.user;
+  const total = rounds.reduce((sum, r) => sum + (parseInt(r) || 0), 0);
+
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -145,14 +130,12 @@ export default function SubmitPage() {
     );
   }
 
-  const total = rounds.reduce((sum, r) => sum + (parseInt(r) || 0), 0);
-
   return (
     <div className="min-h-screen">
       <ConfettiEffect trigger={showConfetti} />
-      <Navbar user={user} />
+      <Navbar user={user || null} />
 
-      <main className="max-w-lg mx-auto px-4 py-6 space-y-6">
+      <main className="max-w-lg mx-auto px-4 pt-24 pb-8 space-y-6">
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -162,15 +145,6 @@ export default function SubmitPage() {
             Enter your 3 round scores from today&apos;s GeoGuessr challenge
           </p>
         </motion.div>
-
-        {/* Status */}
-        {status && (
-          <SubmissionStatus
-            submitted={status.submitted}
-            notSubmitted={status.notSubmitted}
-            revealed={status.revealed}
-          />
-        )}
 
         {/* Already submitted */}
         {submitted && myScores ? (
@@ -204,18 +178,27 @@ export default function SubmitPage() {
               </p>
             </div>
 
-            {revealed ? (
-              <a
-                href="/"
-                className="inline-block px-6 py-2 rounded-xl bg-accent-green text-white font-semibold hover:bg-accent-green/90 transition-colors"
-              >
-                View Results
-              </a>
-            ) : (
-              <p className="text-sm text-text-secondary pulse-gentle">
-                Waiting for all players to submit...
-              </p>
+            {revealedGroups.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm text-accent-green font-medium">Scores revealed in:</p>
+                {revealedGroups.map(g => (
+                  <a
+                    key={g.groupId}
+                    href={`/groups/${g.groupId}`}
+                    className="block text-sm text-accent-blue hover:underline"
+                  >
+                    {g.groupName}
+                  </a>
+                ))}
+              </div>
             )}
+
+            <a
+              href="/"
+              className="inline-block px-6 py-2 rounded-xl bg-accent-green text-white font-semibold hover:bg-accent-green/90 transition-colors"
+            >
+              Back to Dashboard
+            </a>
           </motion.div>
         ) : (
           /* Score entry form */

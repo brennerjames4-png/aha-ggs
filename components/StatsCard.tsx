@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 interface StatsCardProps {
   label: string;
   value: string | number;
-  icon: string;
+  icon?: string;
   color?: string;
   delay?: number;
 }

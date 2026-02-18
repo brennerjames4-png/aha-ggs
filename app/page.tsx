@@ -1,72 +1,111 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import ScoreCard from '@/components/ScoreCard';
 import SubmissionStatus from '@/components/SubmissionStatus';
 import WeeklyBoard from '@/components/WeeklyBoard';
 import StatsCard from '@/components/StatsCard';
+import GroupSelector from '@/components/GroupSelector';
 import ConfettiEffect from '@/components/ConfettiEffect';
 import { motion } from 'framer-motion';
-import { DISPLAY_NAMES, PLAYERS } from '@/lib/types';
-import type { Username, WeeklyStanding, DailyResult, PlayerStats } from '@/lib/types';
+import { getMemberColor } from '@/lib/colors';
+
+interface GroupOption {
+  id: string;
+  name: string;
+  isOriginal: boolean;
+  members: string[];
+}
 
 export default function Dashboard() {
+  const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
-  const [user, setUser] = useState<Username | null>(null);
-  const [todayData, setTodayData] = useState<{
-    date: string;
-    submitted: boolean;
-    myScores: [number, number, number] | null;
-    status: { submitted: Username[]; notSubmitted: Username[]; revealed: boolean; total: number };
-    result: DailyResult | null;
-  } | null>(null);
-  const [stats, setStats] = useState<Record<Username, PlayerStats> | null>(null);
-  const [weekStandings, setWeekStandings] = useState<WeeklyStanding[] | null>(null);
+
+  const [groups, setGroups] = useState<GroupOption[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [memberInfos, setMemberInfos] = useState<any>({});
+  const [todayResult, setTodayResult] = useState<any>(null);
+  const [myScore, setMyScore] = useState<any>(null);
+  const [weekStandings, setWeekStandings] = useState<any>(null);
+  const [allTimeStats, setAllTimeStats] = useState<any[]>([]);
   const [showConfetti, setShowConfetti] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Load groups
   useEffect(() => {
-    async function load() {
+    if (sessionStatus !== 'authenticated') return;
+
+    async function loadGroups() {
       try {
-        const [authRes, todayRes, statsRes] = await Promise.all([
-          fetch('/api/auth'),
-          fetch('/api/scores/today'),
-          fetch('/api/stats'),
+        const res = await fetch('/api/groups');
+        if (res.ok) {
+          const data = await res.json();
+          setGroups(data.groups);
+
+          // Auto-select first group or stored preference
+          const stored = localStorage.getItem('aha-selected-group');
+          const validStored = data.groups.find((g: GroupOption) => g.id === stored);
+          const firstGroup = data.groups[0];
+          setSelectedGroupId(validStored?.id || firstGroup?.id || null);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadGroups();
+  }, [sessionStatus]);
+
+  // Load group data when selection changes
+  useEffect(() => {
+    if (!selectedGroupId) {
+      setLoading(false);
+      return;
+    }
+
+    localStorage.setItem('aha-selected-group', selectedGroupId);
+
+    async function loadGroupData() {
+      setLoading(true);
+      try {
+        const [scoresRes, statsRes, groupRes] = await Promise.all([
+          fetch(`/api/groups/${selectedGroupId}/scores`),
+          fetch(`/api/groups/${selectedGroupId}/stats`),
+          fetch(`/api/groups/${selectedGroupId}`),
         ]);
 
-        if (!authRes.ok) {
-          router.push('/login');
-          return;
+        if (groupRes.ok) {
+          const gData = await groupRes.json();
+          setMemberInfos(gData.memberInfos);
         }
 
-        const authData = await authRes.json();
-        setUser(authData.user);
-
-        if (todayRes.ok) {
-          const td = await todayRes.json();
-          setTodayData(td);
-          if (td.result?.revealed && td.result?.winner === authData.user) {
+        if (scoresRes.ok) {
+          const sData = await scoresRes.json();
+          setTodayResult(sData.result);
+          setMyScore(sData.myScore);
+          if (sData.memberInfos) setMemberInfos((prev: any) => ({ ...prev, ...sData.memberInfos }));
+          if (sData.result?.revealed && sData.result?.winner === session?.user?.id) {
             setShowConfetti(true);
           }
         }
 
         if (statsRes.ok) {
-          const sd = await statsRes.json();
-          setStats(sd.stats);
-          setWeekStandings(sd.currentWeek.standings);
+          const stData = await statsRes.json();
+          setWeekStandings(stData.currentWeek?.standings);
+          setAllTimeStats(stData.allTimeStats || []);
         }
-      } catch (err) {
-        console.error('Failed to load dashboard:', err);
+      } catch {
+        // ignore
       } finally {
         setLoading(false);
       }
     }
-    load();
-  }, [router]);
+    loadGroupData();
+  }, [selectedGroupId, session?.user?.id]);
 
-  if (loading || !user) {
+  if (sessionStatus === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -77,14 +116,20 @@ export default function Dashboard() {
     );
   }
 
-  const myStats = stats?.[user];
+  const user = session?.user;
+  const selectedGroup = groups.find(g => g.id === selectedGroupId);
+  const memberIds = selectedGroup?.members || [];
+  const revealed = todayResult?.revealed || false;
+
+  // Find current user stats
+  const myStats = allTimeStats.find((s: any) => s.userId === user?.id);
 
   return (
     <div className="min-h-screen">
       <ConfettiEffect trigger={showConfetti} />
-      <Navbar user={user} />
+      <Navbar user={user || null} />
 
-      <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+      <main className="max-w-5xl mx-auto px-4 pt-24 pb-8 space-y-6">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -10 }}
@@ -93,10 +138,10 @@ export default function Dashboard() {
         >
           <div>
             <h1 className="text-2xl font-bold text-text-primary">
-              Welcome back, {DISPLAY_NAMES[user]}!
+              Welcome back, {user?.name || user?.username || 'Explorer'}!
             </h1>
             <p className="text-text-secondary text-sm mt-1">
-              {todayData?.date ? `Today: ${todayData.date}` : "Ready for today's challenge?"}
+              Ready for today&apos;s challenge?
             </p>
           </div>
           {myStats && myStats.currentStreak > 0 && (
@@ -109,112 +154,144 @@ export default function Dashboard() {
           )}
         </motion.div>
 
-        {/* Quick Stats */}
-        {myStats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatsCard label="Days Won" value={myStats.daysWon} icon="🏆" color="#D4A017" delay={0} />
-            <StatsCard label="Best Round" value={myStats.bestRound.toLocaleString()} icon="⭐" color="#F59E0B" delay={0.05} />
-            <StatsCard label="Avg Daily" value={myStats.averageDaily.toLocaleString()} icon="📊" color="#3B82F6" delay={0.1} />
-            <StatsCard label="GD Points" value={myStats.gdPoints} icon="🎯" color="#EF4444" delay={0.15} />
+        {/* Group selector */}
+        {groups.length > 0 && (
+          <GroupSelector
+            groups={groups}
+            selectedGroupId={selectedGroupId}
+            onSelect={setSelectedGroupId}
+          />
+        )}
+
+        {groups.length === 0 && !loading && (
+          <div className="glass-card p-8 text-center">
+            <div className="text-4xl mb-4">🌍</div>
+            <p className="text-text-secondary">You&apos;re not in any groups yet.</p>
+            <a href="/groups/create" className="text-accent-green hover:underline text-sm mt-2 inline-block">
+              Create your first group
+            </a>
           </div>
         )}
 
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Today's Status */}
-          <div className="space-y-4">
-            <h2 className="text-lg font-bold text-text-primary">Today</h2>
+        {loading && selectedGroupId && (
+          <div className="flex justify-center py-12">
+            <div className="w-8 h-8 border-2 border-accent-green/30 border-t-accent-green rounded-full animate-spin" />
+          </div>
+        )}
 
-            {todayData && (
-              <SubmissionStatus
-                submitted={todayData.status.submitted}
-                notSubmitted={todayData.status.notSubmitted}
-                revealed={todayData.status.revealed}
-              />
-            )}
-
-            {todayData && !todayData.submitted && (
-              <motion.a
-                href="/submit"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="block glass-card p-4 text-center hover:bg-bg-card-hover transition-colors cursor-pointer"
-              >
-                <span className="text-3xl block mb-2">📝</span>
-                <p className="font-semibold text-accent-green">Submit Today&apos;s Scores</p>
-                <p className="text-xs text-text-secondary mt-1">Enter your 3 round scores</p>
-              </motion.a>
-            )}
-
-            {todayData && todayData.submitted && !todayData.status.revealed && todayData.myScores && (
-              <div className="glass-card p-4">
-                <p className="text-sm font-medium text-text-primary mb-2">Your Scores (Locked In)</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {todayData.myScores.map((s, i) => (
-                    <div key={i} className="text-center bg-bg-primary rounded-lg p-2">
-                      <p className="text-xs text-text-secondary">R{i + 1}</p>
-                      <p className="text-lg font-bold text-accent-green">{s.toLocaleString()}</p>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-center text-sm text-text-secondary mt-3">
-                  Total: <span className="font-bold text-text-primary">
-                    {todayData.myScores.reduce((a: number, b: number) => a + b, 0).toLocaleString()}
-                  </span> / 15,000
-                </p>
+        {!loading && selectedGroupId && (
+          <>
+            {/* Quick Stats */}
+            {myStats && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatsCard label="Days Won" value={myStats.daysWon} icon="🏆" color="#D4A017" delay={0} />
+                <StatsCard label="Best Round" value={myStats.bestRound.toLocaleString()} icon="⭐" color="#F59E0B" delay={0.05} />
+                <StatsCard label="Avg Daily" value={myStats.averageDaily.toLocaleString()} icon="📊" color="#3B82F6" delay={0.1} />
+                <StatsCard label="GD Points" value={myStats.gdPoints} icon="🎯" color="#EF4444" delay={0.15} />
               </div>
             )}
-          </div>
 
-          {/* Weekly Standings */}
-          <div className="space-y-4">
-            <h2 className="text-lg font-bold text-text-primary">This Week</h2>
-            {weekStandings && (
-              <WeeklyBoard
-                standings={weekStandings}
-                weekLabel="Current Week"
-                compact
-              />
-            )}
-          </div>
-        </div>
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Today's Status */}
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold text-text-primary">Today</h2>
 
-        {/* Today's Results (if revealed) */}
-        {todayData?.result?.revealed && todayData.result && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-bold text-text-primary">
-              Today&apos;s Results
-              {todayData.result.winner && (
-                <span className="ml-2 text-sm text-accent-gold">
-                  🏆 {DISPLAY_NAMES[todayData.result.winner]} wins!
-                </span>
-              )}
-            </h2>
-            <div className="grid md:grid-cols-3 gap-4">
-              {(() => {
-                const sortedPlayers = [...PLAYERS].sort((a, b) => {
-                  const aTotal = todayData.result!.scores[a]?.total ?? 0;
-                  const bTotal = todayData.result!.scores[b]?.total ?? 0;
-                  return bTotal - aTotal;
-                });
-                return sortedPlayers.map((player, i) => {
-                  const pScore = todayData.result!.scores[player];
-                  return (
-                    <ScoreCard
-                      key={player}
-                      player={player}
-                      rounds={pScore?.rounds ?? null}
-                      total={pScore?.total ?? null}
-                      isWinner={todayData.result!.winner === player}
-                      isGdWinner={todayData.result!.gdWinner === player}
-                      rank={i + 1}
-                      revealed={true}
-                      delay={i}
-                    />
-                  );
-                });
-              })()}
+                {todayResult && (
+                  <SubmissionStatus
+                    memberIds={memberIds}
+                    memberInfos={memberInfos}
+                    submittedCount={todayResult.submittedCount}
+                    totalMembers={memberIds.length}
+                    revealed={revealed}
+                    currentUserId={user?.id || null}
+                    mySubmitted={!!myScore?.submitted}
+                  />
+                )}
+
+                {!myScore?.submitted && (
+                  <motion.a
+                    href="/submit"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="block glass-card p-4 text-center hover:bg-bg-card-hover transition-colors cursor-pointer"
+                  >
+                    <span className="text-3xl block mb-2">📝</span>
+                    <p className="font-semibold text-accent-green">Submit Today&apos;s Scores</p>
+                    <p className="text-xs text-text-secondary mt-1">Enter your 3 round scores</p>
+                  </motion.a>
+                )}
+
+                {myScore?.submitted && !revealed && (
+                  <div className="glass-card p-4">
+                    <p className="text-sm font-medium text-text-primary mb-2">Your Scores (Locked In)</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {myScore.rounds.map((s: number, i: number) => (
+                        <div key={i} className="text-center bg-bg-primary rounded-lg p-2">
+                          <p className="text-xs text-text-secondary">R{i + 1}</p>
+                          <p className="text-lg font-bold text-accent-green">{s.toLocaleString()}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-center text-sm text-text-secondary mt-3">
+                      Total: <span className="font-bold text-text-primary">
+                        {myScore.rounds.reduce((a: number, b: number) => a + b, 0).toLocaleString()}
+                      </span> / 15,000
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Weekly Standings */}
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold text-text-primary">This Week</h2>
+                {weekStandings && (
+                  <WeeklyBoard
+                    standings={weekStandings}
+                    memberIds={memberIds}
+                    weekLabel="Current Week"
+                    compact
+                  />
+                )}
+              </div>
             </div>
-          </div>
+
+            {/* Today's Results (if revealed) */}
+            {revealed && todayResult?.scores && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold text-text-primary">
+                  Today&apos;s Results
+                </h2>
+                <div className="grid md:grid-cols-3 gap-4">
+                  {memberIds
+                    .filter((id: string) => todayResult.scores[id])
+                    .sort((a: string, b: string) => {
+                      const aTotal = todayResult.scores[a]?.total || 0;
+                      const bTotal = todayResult.scores[b]?.total || 0;
+                      return bTotal - aTotal;
+                    })
+                    .map((id: string, i: number) => {
+                      const info = memberInfos[id] || { displayName: id };
+                      const scoreData = todayResult.scores[id];
+                      return (
+                        <ScoreCard
+                          key={id}
+                          userId={id}
+                          displayName={info.displayName}
+                          avatarUrl={info.avatarUrl}
+                          color={getMemberColor(memberIds.indexOf(id))}
+                          rounds={scoreData.rounds}
+                          total={scoreData.total}
+                          rank={i + 1}
+                          isWinner={todayResult.winner === id}
+                          isGdWinner={todayResult.gdWinner === id}
+                          delay={i}
+                        />
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </main>
     </div>

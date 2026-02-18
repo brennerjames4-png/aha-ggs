@@ -1,51 +1,33 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { DISPLAY_NAMES, PLAYER_COLORS } from '@/lib/types';
-import type { Username } from '@/lib/types';
 
 interface ScoreCardProps {
-  player: Username;
-  rounds: [number, number, number] | null;
-  total: number | null;
+  userId: string;
+  displayName: string;
+  avatarUrl?: string | null;
+  color: string;
+  rounds: [number, number, number];
+  total: number;
+  rank: number;
   isWinner: boolean;
   isGdWinner: boolean;
-  rank: number;
-  revealed: boolean;
   delay?: number;
 }
 
 export default function ScoreCard({
-  player,
+  userId,
+  displayName,
+  avatarUrl,
+  color,
   rounds,
   total,
+  rank,
   isWinner,
   isGdWinner,
-  rank,
-  revealed,
   delay = 0,
 }: ScoreCardProps) {
-  const color = PLAYER_COLORS[player];
-  const scorePercent = total ? (total / 15000) * 100 : 0;
-
-  if (!revealed || !rounds || total === null) {
-    return (
-      <div className="glass-card p-4 opacity-50">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg"
-            style={{ backgroundColor: `${color}20`, color }}
-          >
-            {DISPLAY_NAMES[player][0]}
-          </div>
-          <div>
-            <p className="font-semibold text-text-primary">{DISPLAY_NAMES[player]}</p>
-            <p className="text-sm text-text-secondary">Awaiting scores...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const scorePercent = (total / 15000) * 100;
 
   return (
     <motion.div
@@ -71,14 +53,22 @@ export default function ScoreCard({
       )}
 
       <div className="flex items-center gap-3 mb-3">
-        <div
-          className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg"
-          style={{ backgroundColor: `${color}20`, color }}
-        >
-          {DISPLAY_NAMES[player][0]}
-        </div>
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={displayName}
+            className="w-10 h-10 rounded-full"
+          />
+        ) : (
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg"
+            style={{ backgroundColor: `${color}20`, color }}
+          >
+            {displayName[0]}
+          </div>
+        )}
         <div>
-          <p className="font-semibold text-text-primary">{DISPLAY_NAMES[player]}</p>
+          <p className="font-semibold text-text-primary">{displayName}</p>
           {isWinner && (
             <p className="text-xs text-accent-gold font-medium">Daily Winner!</p>
           )}

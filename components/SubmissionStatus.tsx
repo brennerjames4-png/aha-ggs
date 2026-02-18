@@ -1,16 +1,33 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { DISPLAY_NAMES, PLAYER_COLORS } from '@/lib/types';
-import type { Username } from '@/lib/types';
+import { getMemberColor } from '@/lib/colors';
 
-interface SubmissionStatusProps {
-  submitted: Username[];
-  notSubmitted: Username[];
-  revealed: boolean;
+interface MemberInfo {
+  displayName: string;
+  username: string;
+  avatarUrl: string | null;
 }
 
-export default function SubmissionStatus({ submitted, notSubmitted, revealed }: SubmissionStatusProps) {
+interface SubmissionStatusProps {
+  memberIds: string[];
+  memberInfos: Record<string, MemberInfo>;
+  submittedCount: number;
+  totalMembers: number;
+  revealed: boolean;
+  currentUserId: string | null;
+  mySubmitted: boolean;
+}
+
+export default function SubmissionStatus({
+  memberIds,
+  memberInfos,
+  submittedCount,
+  totalMembers,
+  revealed,
+  currentUserId,
+  mySubmitted,
+}: SubmissionStatusProps) {
   if (revealed) {
     return (
       <motion.div
@@ -29,42 +46,47 @@ export default function SubmissionStatus({ submitted, notSubmitted, revealed }: 
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm font-medium text-text-primary">Submission Status</p>
         <span className="text-sm text-text-secondary">
-          {submitted.length}/3
+          {submittedCount}/{totalMembers}
         </span>
       </div>
 
-      {/* Progress bar */}
       <div className="w-full h-2 rounded-full bg-bg-primary mb-4">
         <motion.div
           className="h-full rounded-full bg-accent-green"
           initial={{ width: 0 }}
-          animate={{ width: `${(submitted.length / 3) * 100}%` }}
+          animate={{ width: `${totalMembers > 0 ? (submittedCount / totalMembers) * 100 : 0}%` }}
           transition={{ duration: 0.5 }}
         />
       </div>
 
       <div className="space-y-2">
-        {submitted.map(player => (
-          <div key={player} className="flex items-center gap-2">
+        {/* Show current user first */}
+        {currentUserId && (
+          <div className="flex items-center gap-2">
             <div
-              className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
-              style={{ backgroundColor: `${PLAYER_COLORS[player]}20`, color: PLAYER_COLORS[player] }}
+              className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
+                mySubmitted
+                  ? 'bg-accent-green/20 text-accent-green font-bold'
+                  : 'bg-bg-primary text-text-secondary'
+              }`}
             >
-              ✓
+              {mySubmitted ? '✓' : '⏳'}
             </div>
-            <span className="text-sm text-text-primary">{DISPLAY_NAMES[player]}</span>
-            <span className="text-xs text-accent-green ml-auto">Submitted</span>
+            <span className="text-sm text-text-primary">
+              You {!mySubmitted && '(not submitted)'}
+            </span>
+            <span className={`text-xs ml-auto ${mySubmitted ? 'text-accent-green' : 'text-text-secondary pulse-gentle'}`}>
+              {mySubmitted ? 'Submitted' : 'Waiting...'}
+            </span>
           </div>
-        ))}
-        {notSubmitted.map(player => (
-          <div key={player} className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs bg-bg-primary text-text-secondary">
-              ⏳
-            </div>
-            <span className="text-sm text-text-secondary">{DISPLAY_NAMES[player]}</span>
-            <span className="text-xs text-text-secondary ml-auto pulse-gentle">Waiting...</span>
+        )}
+
+        {/* Others - just show count waiting */}
+        {submittedCount < totalMembers && (
+          <div className="text-xs text-text-secondary text-center mt-2">
+            Waiting for {totalMembers - submittedCount} more player{totalMembers - submittedCount !== 1 ? 's' : ''}...
           </div>
-        ))}
+        )}
       </div>
     </div>
   );

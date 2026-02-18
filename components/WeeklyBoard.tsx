@@ -1,35 +1,49 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { DISPLAY_NAMES, PLAYER_COLORS } from '@/lib/types';
-import type { Username, WeeklyStanding } from '@/lib/types';
+import { getMemberColor } from '@/lib/colors';
+
+interface Standing {
+  userId: string;
+  displayName: string;
+  username: string;
+  avatarUrl: string | null;
+  daysWon: number;
+  gdPoints: number;
+  totalPoints: number;
+  isWeekWinner: boolean;
+}
 
 interface WeeklyBoardProps {
-  standings: WeeklyStanding[];
-  weekLabel: string;
+  standings: Standing[];
+  memberIds: string[];
+  weekLabel?: string;
   compact?: boolean;
 }
 
-export default function WeeklyBoard({ standings, weekLabel, compact = false }: WeeklyBoardProps) {
+export default function WeeklyBoard({ standings, memberIds, weekLabel, compact = false }: WeeklyBoardProps) {
   return (
     <div className="glass-card p-4">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-bold text-text-primary">
-          📅 {compact ? 'This Week' : weekLabel}
-        </h3>
-        {standings.some(s => s.isWeekWinner) && (
-          <span className="text-sm text-accent-gold font-medium">
-            🏆 {DISPLAY_NAMES[standings.find(s => s.isWeekWinner)!.player]}
-          </span>
-        )}
-      </div>
+      {weekLabel && (
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-text-primary">
+            {compact ? 'This Week' : weekLabel}
+          </h3>
+          {standings.some(s => s.isWeekWinner) && (
+            <span className="text-sm text-accent-gold font-medium">
+              {standings.find(s => s.isWeekWinner)?.displayName}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="space-y-3">
         {standings.map((s, i) => {
-          const color = PLAYER_COLORS[s.player];
+          const color = getMemberColor(memberIds.indexOf(s.userId));
+          const medals = ['🥇', '🥈', '🥉'];
           return (
             <motion.div
-              key={s.player}
+              key={s.userId}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.1 }}
@@ -39,20 +53,24 @@ export default function WeeklyBoard({ standings, weekLabel, compact = false }: W
             >
               {/* Rank */}
               <span className="text-xl w-8 text-center">
-                {i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}
+                {i < 3 ? medals[i] : <span className="text-sm text-text-secondary">{i + 1}</span>}
               </span>
 
-              {/* Player */}
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm"
-                style={{ backgroundColor: `${color}20`, color }}
-              >
-                {DISPLAY_NAMES[s.player][0]}
-              </div>
+              {/* Avatar */}
+              {s.avatarUrl ? (
+                <img src={s.avatarUrl} alt="" className="w-8 h-8 rounded-full" />
+              ) : (
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm"
+                  style={{ backgroundColor: `${color}20`, color }}
+                >
+                  {s.displayName[0]}
+                </div>
+              )}
 
-              <div className="flex-1">
-                <p className="font-semibold text-sm text-text-primary">
-                  {DISPLAY_NAMES[s.player]}
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm text-text-primary truncate">
+                  {s.displayName}
                   {s.isWeekWinner && <span className="ml-2">👑</span>}
                 </p>
                 {!compact && (
