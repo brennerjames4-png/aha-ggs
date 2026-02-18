@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useParams, useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
 import BackButton from '@/components/BackButton';
 import ScoreCard from '@/components/ScoreCard';
@@ -29,27 +28,15 @@ export default function GroupDashboard() {
   useEffect(() => {
     async function load() {
       try {
-        const [groupRes, scoresRes, statsRes] = await Promise.all([
-          fetch(`/api/groups/${groupId}`),
-          fetch(`/api/groups/${groupId}/scores`),
-          fetch(`/api/groups/${groupId}/stats`),
-        ]);
-
-        if (groupRes.ok) {
-          const gData = await groupRes.json();
-          setGroup(gData.group);
-          setMemberInfos(gData.memberInfos);
-        }
-        if (scoresRes.ok) {
-          const sData = await scoresRes.json();
-          setTodayResult(sData.result);
-          setMyScore(sData.myScore);
-          if (sData.memberInfos) setMemberInfos(sData.memberInfos);
-          if (sData.result?.revealed) setShowConfetti(true);
-        }
-        if (statsRes.ok) {
-          const stData = await statsRes.json();
-          setWeekData(stData.currentWeek);
+        const res = await fetch(`/api/groups/${groupId}/dashboard`);
+        if (res.ok) {
+          const data = await res.json();
+          setGroup(data.group);
+          setMemberInfos(data.memberInfos);
+          setTodayResult(data.result);
+          setMyScore(data.myScore);
+          setWeekData(data.currentWeek);
+          if (data.result?.revealed) setShowConfetti(true);
         }
       } catch {
         // ignore

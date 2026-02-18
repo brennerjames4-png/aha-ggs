@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
 import BackButton from '@/components/BackButton';
 import UserSearch from '@/components/UserSearch';

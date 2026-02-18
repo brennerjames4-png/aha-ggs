@@ -10,7 +10,6 @@ import WeeklyBoard from '@/components/WeeklyBoard';
 import StatsCard from '@/components/StatsCard';
 import GroupSelector from '@/components/GroupSelector';
 import ConfettiEffect from '@/components/ConfettiEffect';
-import { motion } from 'framer-motion';
 import { getMemberColor } from '@/lib/colors';
 
 interface GroupOption {
@@ -34,36 +33,53 @@ export default function Dashboard() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load groups
+  // Load groups and immediately fetch dashboard for the selected group
   useEffect(() => {
     if (sessionStatus !== 'authenticated') return;
 
-    async function loadGroups() {
+    async function loadAll() {
       try {
         const res = await fetch('/api/groups');
-        if (res.ok) {
-          const data = await res.json();
-          setGroups(data.groups);
+        if (!res.ok) return;
+        const data = await res.json();
+        setGroups(data.groups);
 
-          // Auto-select first group or stored preference
-          const stored = localStorage.getItem('aha-selected-group');
-          const validStored = data.groups.find((g: GroupOption) => g.id === stored);
-          const firstGroup = data.groups[0];
-          setSelectedGroupId(validStored?.id || firstGroup?.id || null);
+        // Determine which group to show
+        const stored = localStorage.getItem('aha-selected-group');
+        const validStored = data.groups.find((g: GroupOption) => g.id === stored);
+        const firstGroup = data.groups[0];
+        const groupId = validStored?.id || firstGroup?.id || null;
+        setSelectedGroupId(groupId);
+
+        // Immediately fetch dashboard data (no waterfall)
+        if (groupId) {
+          localStorage.setItem('aha-selected-group', groupId);
+          const dashRes = await fetch(`/api/groups/${groupId}/dashboard`);
+          if (dashRes.ok) {
+            const dashData = await dashRes.json();
+            setMemberInfos(dashData.memberInfos);
+            setTodayResult(dashData.result);
+            setMyScore(dashData.myScore);
+            setWeekStandings(dashData.currentWeek?.standings);
+            setAllTimeStats(dashData.allTimeStats || []);
+            if (dashData.result?.revealed && dashData.result?.winner === session?.user?.id) {
+              setShowConfetti(true);
+            }
+          }
         }
       } catch {
         // ignore
+      } finally {
+        setLoading(false);
       }
     }
-    loadGroups();
-  }, [sessionStatus]);
+    loadAll();
+  }, [sessionStatus, session?.user?.id]);
 
-  // Load group data when selection changes
+  // Reload group data when user manually switches groups
+  const [manualSwitch, setManualSwitch] = useState(false);
   useEffect(() => {
-    if (!selectedGroupId) {
-      setLoading(false);
-      return;
-    }
+    if (!manualSwitch || !selectedGroupId) return;
 
     localStorage.setItem('aha-selected-group', selectedGroupId);
 
@@ -86,10 +102,11 @@ export default function Dashboard() {
         // ignore
       } finally {
         setLoading(false);
+        setManualSwitch(false);
       }
     }
     loadGroupData();
-  }, [selectedGroupId, session?.user?.id]);
+  }, [manualSwitch, selectedGroupId, session?.user?.id]);
 
   if (sessionStatus === 'loading') {
     return (
@@ -117,11 +134,7 @@ export default function Dashboard() {
 
       <main className="max-w-5xl mx-auto px-4 pt-24 pb-8 space-y-6">
         {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between"
-        >
+        <div className="flex items-center justify-between animate-fade-in">
           <div>
             <h1 className="text-2xl font-bold text-text-primary">
               Welcome back, {user?.name || user?.username || 'Explorer'}!
@@ -138,14 +151,14 @@ export default function Dashboard() {
               </span>
             </div>
           )}
-        </motion.div>
+        </div>
 
         {/* Group selector */}
         {groups.length > 0 && (
           <GroupSelector
             groups={groups}
             selectedGroupId={selectedGroupId}
-            onSelect={setSelectedGroupId}
+            onSelect={(id) => { setSelectedGroupId(id); setManualSwitch(true); }}
           />
         )}
 
@@ -195,16 +208,14 @@ export default function Dashboard() {
                 )}
 
                 {!myScore?.submitted && (
-                  <motion.a
+                  <a
                     href="/submit"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="block glass-card p-4 text-center hover:bg-bg-card-hover transition-colors cursor-pointer"
+                    className="block glass-card p-4 text-center hover:bg-bg-card-hover transition-colors cursor-pointer animate-fade-in"
                   >
                     <span className="text-3xl block mb-2">📝</span>
                     <p className="font-semibold text-accent-green">Submit Today&apos;s Scores</p>
                     <p className="text-xs text-text-secondary mt-1">Enter your 3 round scores</p>
-                  </motion.a>
+                  </a>
                 )}
 
                 {myScore?.submitted && !revealed && (

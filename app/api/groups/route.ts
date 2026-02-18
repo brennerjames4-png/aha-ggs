@@ -32,7 +32,9 @@ export async function GET() {
       })
     );
 
-    return NextResponse.json({ groups, pendingInvites: enrichedInvites });
+    return NextResponse.json({ groups, pendingInvites: enrichedInvites }, {
+      headers: { 'Cache-Control': 'private, max-age=30, stale-while-revalidate=60' },
+    });
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

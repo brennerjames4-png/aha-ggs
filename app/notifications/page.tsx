@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
 import BackButton from '@/components/BackButton';
 
@@ -92,12 +91,9 @@ export default function NotificationsPage() {
             const alreadyResponded = inviteId ? respondedIds.has(inviteId) : false;
 
             return (
-              <motion.div
+              <div
                 key={n.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.03 }}
-                className={`glass-card p-4 ${!n.read ? 'border-l-2 border-l-accent-green' : ''}`}
+                className={`glass-card p-4 animate-fade-in ${!n.read ? 'border-l-2 border-l-accent-green' : ''}`}
               >
                 <div className="flex items-start gap-3">
                   <span className="text-xl">{typeIcons[n.type] || '📌'}</span>
@@ -132,7 +128,7 @@ export default function NotificationsPage() {
                     )}
                   </div>
                 </div>
-              </motion.div>
+              </div>
             );
           })
         )}

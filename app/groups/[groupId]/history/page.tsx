@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useParams } from 'next/navigation';
-import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
 import BackButton from '@/components/BackButton';
 import StatsCard from '@/components/StatsCard';
@@ -71,12 +70,9 @@ export default function GroupHistory() {
             {stats.map((stat: any, i: number) => {
               const color = getMemberColor(i);
               return (
-                <motion.div
+                <div
                   key={stat.userId}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                  className="glass-card p-4"
+                  className="glass-card p-4 animate-fade-in"
                 >
                   <div className="flex items-center gap-3 mb-3">
                     <div
@@ -99,7 +95,7 @@ export default function GroupHistory() {
                     <StatsCard label="Perfect Rounds" value={stat.perfectRounds} />
                     <StatsCard label="Total Points" value={stat.totalPoints.toLocaleString()} />
                   </div>
-                </motion.div>
+                </div>
               );
             })}
           </div>

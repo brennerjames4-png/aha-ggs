@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
 
 interface GroupItem {
@@ -144,13 +143,10 @@ export default function GroupsPage() {
         ) : (
           <div className="space-y-3">
             {groups.map((group, i) => (
-              <motion.button
+              <button
                 key={group.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
                 onClick={() => router.push(`/groups/${group.id}`)}
-                className="w-full glass-card p-4 flex items-center justify-between hover:bg-bg-secondary/50 transition-all text-left"
+                className="w-full glass-card p-4 flex items-center justify-between hover:bg-bg-secondary/50 transition-all text-left animate-fade-in"
               >
                 <div>
                   <div className="font-semibold text-text-primary flex items-center gap-2">
@@ -166,7 +162,7 @@ export default function GroupsPage() {
                   </div>
                 </div>
                 <span className="text-text-secondary">&rarr;</span>
-              </motion.button>
+              </button>
             ))}
           </div>
         )}

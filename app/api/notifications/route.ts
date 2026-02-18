@@ -11,7 +11,9 @@ export async function GET() {
       getUnreadCount(userId),
     ]);
 
-    return NextResponse.json({ notifications, unreadCount });
+    return NextResponse.json({ notifications, unreadCount }, {
+      headers: { 'Cache-Control': 'private, max-age=10, stale-while-revalidate=20' },
+    });
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

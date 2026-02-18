@@ -41,6 +41,8 @@ export async function GET(
         standings: currentStandings,
       },
       allTimeStats,
+    }, {
+      headers: { 'Cache-Control': 'private, max-age=15, stale-while-revalidate=30' },
     });
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

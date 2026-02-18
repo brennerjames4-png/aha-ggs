@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useParams } from 'next/navigation';
-import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
 import BackButton from '@/components/BackButton';
 
@@ -93,11 +92,7 @@ export default function ProfilePage() {
       <Navbar user={session?.user || null} />
       <div className="max-w-2xl mx-auto px-4 pt-24 pb-8 space-y-4">
         <BackButton label="Back" />
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-card p-6"
-        >
+        <div className="glass-card p-6 animate-fade-in">
           <div className="flex items-center gap-4 mb-6">
             {profile.avatarUrl ? (
               <img
@@ -145,7 +140,7 @@ export default function ProfilePage() {
               {profile.groups.length} group{profile.groups.length !== 1 ? 's' : ''}
             </p>
           </div>
-        </motion.div>
+        </div>
       </div>
     </div>
   );

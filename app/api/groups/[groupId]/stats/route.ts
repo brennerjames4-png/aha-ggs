@@ -39,6 +39,8 @@ export async function GET(
       },
       allTimeStats,
       memberInfos,
+    }, {
+      headers: { 'Cache-Control': 'private, max-age=30, stale-while-revalidate=60' },
     });
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

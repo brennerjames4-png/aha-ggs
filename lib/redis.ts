@@ -442,23 +442,7 @@ export async function addFriend(userId1: UserId, userId2: UserId): Promise<void>
   const pipeline = redis.pipeline();
   pipeline.sadd(`friends:${userId1}`, userId2);
   pipeline.sadd(`friends:${userId2}`, userId1);
-  pipeline.get(`user:${userId1}`);
-  pipeline.get(`user:${userId2}`);
-  const results = await pipeline.exec();
-
-  const user1 = parseJson<UserProfile>(results[2]);
-  const user2 = parseJson<UserProfile>(results[3]);
-
-  const updatePipeline = redis.pipeline();
-  if (user1 && !user1.friends.includes(userId2)) {
-    user1.friends.push(userId2);
-    updatePipeline.set(`user:${userId1}`, JSON.stringify(user1));
-  }
-  if (user2 && !user2.friends.includes(userId1)) {
-    user2.friends.push(userId1);
-    updatePipeline.set(`user:${userId2}`, JSON.stringify(user2));
-  }
-  await updatePipeline.exec();
+  await pipeline.exec();
 }
 
 export async function removeFriend(userId1: UserId, userId2: UserId): Promise<void> {
@@ -466,23 +450,7 @@ export async function removeFriend(userId1: UserId, userId2: UserId): Promise<vo
   const pipeline = redis.pipeline();
   pipeline.srem(`friends:${userId1}`, userId2);
   pipeline.srem(`friends:${userId2}`, userId1);
-  pipeline.get(`user:${userId1}`);
-  pipeline.get(`user:${userId2}`);
-  const results = await pipeline.exec();
-
-  const user1 = parseJson<UserProfile>(results[2]);
-  const user2 = parseJson<UserProfile>(results[3]);
-
-  const updatePipeline = redis.pipeline();
-  if (user1) {
-    user1.friends = user1.friends.filter(f => f !== userId2);
-    updatePipeline.set(`user:${userId1}`, JSON.stringify(user1));
-  }
-  if (user2) {
-    user2.friends = user2.friends.filter(f => f !== userId1);
-    updatePipeline.set(`user:${userId2}`, JSON.stringify(user2));
-  }
-  await updatePipeline.exec();
+  await pipeline.exec();
 }
 
 export async function areFriends(userId1: UserId, userId2: UserId): Promise<boolean> {
@@ -680,6 +648,37 @@ export async function createNotification(
   return notification;
 }
 
+/**
+ * Batch create notifications for multiple users in a single pipeline.
+ */
+export async function createNotificationBatch(
+  items: { userId: UserId; type: NotificationType; title: string; body: string; data: Record<string, string> }[]
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const redis = getRedis();
+  const pipeline = redis.pipeline();
+  const now = new Date().toISOString();
+
+  for (const item of items) {
+    const id = generateId('notif');
+    const notification: Notification = {
+      id,
+      userId: item.userId,
+      type: item.type,
+      title: item.title,
+      body: item.body,
+      data: item.data,
+      read: false,
+      createdAt: now,
+    };
+    pipeline.lpush(`notifications:${item.userId}`, JSON.stringify(notification));
+    pipeline.ltrim(`notifications:${item.userId}`, 0, 49);
+    pipeline.incr(`notifications:unread:${item.userId}`);
+  }
+  await pipeline.exec();
+}
+
 export async function getNotifications(userId: UserId, limit = 20): Promise<Notification[]> {
   const redis = getRedis();
   const raw = await redis.lrange(`notifications:${userId}`, 0, limit - 1);
@@ -694,20 +693,9 @@ export async function getUnreadCount(userId: UserId): Promise<number> {
 
 export async function markAllNotificationsRead(userId: UserId): Promise<void> {
   const redis = getRedis();
-
-  const raw = await redis.lrange(`notifications:${userId}`, 0, -1);
-  if (raw.length === 0) return;
-
-  const notifications: Notification[] = raw.map(item => parseJson<Notification>(item)!).filter(Boolean);
-  const updated = notifications.map(n => ({ ...n, read: true }));
-
-  const pipeline = redis.pipeline();
-  pipeline.del(`notifications:${userId}`);
-  for (const n of updated.reverse()) {
-    pipeline.lpush(`notifications:${userId}`, JSON.stringify(n));
-  }
-  pipeline.set(`notifications:unread:${userId}`, 0);
-  await pipeline.exec();
+  // Just reset the unread counter — the `read` field on individual notifications
+  // is cosmetic and not worth rewriting the entire list for
+  await redis.set(`notifications:unread:${userId}`, 0);
 }
 
 // ============================================================

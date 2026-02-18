@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRequiredUser } from '@/lib/auth-helpers';
-import { submitDailyScore, getUserGroups, checkGroupReveal, getGroup, createNotification, getMemberInfos } from '@/lib/redis';
+import { submitDailyScore, getUserGroups, checkGroupRevealBatch, createNotificationBatch } from '@/lib/redis';
 import { getTodayKey } from '@/lib/dates';
-import { GroupId } from '@/lib/types';
+import { UserId, NotificationType } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
   let user;
@@ -28,28 +28,47 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
-  // Check reveal status for each of user's groups
+  // Check reveal status for all groups at once
   const groups = await getUserGroups(user.userId);
-  const revealedGroups: { groupId: string; groupName: string }[] = [];
+  if (groups.length === 0) {
+    return NextResponse.json({
+      success: true,
+      revealedGroups: [],
+      message: 'Scores submitted successfully. Waiting for others...',
+    });
+  }
 
-  for (const group of groups) {
-    const revealed = await checkGroupReveal(group.id, dateKey);
+  // Per-group reveal check in parallel (each hits one smembers call)
+  const groupReveals = await Promise.all(
+    groups.map(async (group) => {
+      const revealMap = await checkGroupRevealBatch(group.members as UserId[], [dateKey]);
+      return { group, revealed: revealMap[dateKey] || false };
+    })
+  );
+
+  const revealedGroups: { groupId: string; groupName: string }[] = [];
+  const notifications: { userId: UserId; type: NotificationType; title: string; body: string; data: Record<string, string> }[] = [];
+
+  for (const { group, revealed } of groupReveals) {
     if (revealed) {
       revealedGroups.push({ groupId: group.id, groupName: group.name });
-
-      // Notify group members that scores are revealed
       for (const memberId of group.members) {
         if (memberId !== user.userId) {
-          await createNotification(
-            memberId,
-            'scores_revealed',
-            'Scores Revealed!',
-            `All scores are in for "${group.name}" today!`,
-            { groupId: group.id, date: dateKey }
-          );
+          notifications.push({
+            userId: memberId as UserId,
+            type: 'scores_revealed',
+            title: 'Scores Revealed!',
+            body: `All scores are in for "${group.name}" today!`,
+            data: { groupId: group.id, date: dateKey },
+          });
         }
       }
     }
+  }
+
+  // Send all notifications in one batch pipeline
+  if (notifications.length > 0) {
+    await createNotificationBatch(notifications);
   }
 
   return NextResponse.json({
