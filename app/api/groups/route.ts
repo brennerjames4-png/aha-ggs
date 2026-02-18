@@ -1,14 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRequiredUser } from '@/lib/auth-helpers';
-import { getUserGroups, createGroup, getUser } from '@/lib/redis';
+import { getUserGroups, createGroup, getUser, getPendingGroupInvites, getGroup } from '@/lib/redis';
 import { GroupId, UserId } from '@/lib/types';
 
-// GET - list user's groups
+// GET - list user's groups + pending invites
 export async function GET() {
   try {
     const { userId } = await getRequiredUser();
-    const groups = await getUserGroups(userId);
-    return NextResponse.json({ groups });
+    const [groups, pendingInvites] = await Promise.all([
+      getUserGroups(userId),
+      getPendingGroupInvites(userId),
+    ]);
+
+    // Enrich invites with group info and inviter info
+    const enrichedInvites = await Promise.all(
+      pendingInvites.map(async (invite) => {
+        const [group, fromUser] = await Promise.all([
+          getGroup(invite.groupId),
+          getUser(invite.from),
+        ]);
+        return {
+          id: invite.id,
+          groupId: invite.groupId,
+          groupName: group?.name || 'Unknown Group',
+          from: invite.from,
+          fromDisplayName: fromUser?.displayName || 'Someone',
+          fromUsername: fromUser?.username || null,
+          fromAvatarUrl: fromUser?.avatarUrl || null,
+          createdAt: invite.createdAt,
+        };
+      })
+    );
+
+    return NextResponse.json({ groups, pendingInvites: enrichedInvites });
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

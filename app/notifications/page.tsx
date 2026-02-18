@@ -2,22 +2,27 @@
 
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Navbar from '@/components/Navbar';
 
-interface Notification {
+interface NotificationItem {
   id: string;
   type: string;
   title: string;
   body: string;
+  data: Record<string, string>;
   read: boolean;
   createdAt: string;
 }
 
 export default function NotificationsPage() {
   const { data: session } = useSession();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const router = useRouter();
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [respondedIds, setRespondedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     async function load() {
@@ -27,7 +32,6 @@ export default function NotificationsPage() {
           const data = await res.json();
           setNotifications(data.notifications);
         }
-        // Mark all as read
         await fetch('/api/notifications', { method: 'PATCH' });
       } catch {
         // ignore
@@ -37,6 +41,24 @@ export default function NotificationsPage() {
     }
     load();
   }, []);
+
+  async function handleGroupInvite(inviteId: string, action: 'accepted' | 'declined') {
+    setRespondingId(inviteId);
+    try {
+      const res = await fetch('/api/groups/invites/respond', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inviteId, action }),
+      });
+      if (res.ok) {
+        setRespondedIds(prev => new Set(prev).add(inviteId));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setRespondingId(null);
+    }
+  }
 
   const typeIcons: Record<string, string> = {
     friend_request: '👤',
@@ -62,26 +84,55 @@ export default function NotificationsPage() {
             <p className="text-text-secondary">No notifications yet</p>
           </div>
         ) : (
-          notifications.map((n, i) => (
-            <motion.div
-              key={n.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.03 }}
-              className={`glass-card p-4 ${!n.read ? 'border-l-2 border-l-accent-green' : ''}`}
-            >
-              <div className="flex items-start gap-3">
-                <span className="text-xl">{typeIcons[n.type] || '📌'}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-text-primary">{n.title}</div>
-                  <div className="text-sm text-text-secondary mt-0.5">{n.body}</div>
-                  <div className="text-xs text-text-secondary mt-1">
-                    {new Date(n.createdAt).toLocaleString()}
+          notifications.map((n, i) => {
+            const inviteId = n.data?.inviteId;
+            const isGroupInvite = n.type === 'group_invite' && inviteId;
+            const alreadyResponded = inviteId ? respondedIds.has(inviteId) : false;
+
+            return (
+              <motion.div
+                key={n.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.03 }}
+                className={`glass-card p-4 ${!n.read ? 'border-l-2 border-l-accent-green' : ''}`}
+              >
+                <div className="flex items-start gap-3">
+                  <span className="text-xl">{typeIcons[n.type] || '📌'}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-text-primary">{n.title}</div>
+                    <div className="text-sm text-text-secondary mt-0.5">{n.body}</div>
+                    <div className="text-xs text-text-secondary mt-1">
+                      {new Date(n.createdAt).toLocaleString()}
+                    </div>
+
+                    {/* Group invite actions */}
+                    {isGroupInvite && !alreadyResponded && (
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => handleGroupInvite(inviteId, 'accepted')}
+                          disabled={respondingId === inviteId}
+                          className="px-3 py-1 rounded-lg bg-accent-green text-white text-sm font-medium disabled:opacity-50"
+                        >
+                          Join Group
+                        </button>
+                        <button
+                          onClick={() => handleGroupInvite(inviteId, 'declined')}
+                          disabled={respondingId === inviteId}
+                          className="px-3 py-1 rounded-lg bg-bg-primary border border-border-main text-text-secondary text-sm disabled:opacity-50"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    )}
+                    {isGroupInvite && alreadyResponded && (
+                      <div className="text-xs text-accent-green mt-2">Responded</div>
+                    )}
                   </div>
                 </div>
-              </div>
-            </motion.div>
-          ))
+              </motion.div>
+            );
+          })
         )}
       </div>
     </div>

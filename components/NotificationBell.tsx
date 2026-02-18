@@ -3,11 +3,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
-interface Notification {
+interface NotificationItem {
   id: string;
   type: string;
   title: string;
   body: string;
+  data: Record<string, string>;
   read: boolean;
   createdAt: string;
 }
@@ -15,8 +16,10 @@ interface Notification {
 export default function NotificationBell() {
   const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [respondedIds, setRespondedIds] = useState<Set<string>>(new Set());
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,9 +54,26 @@ export default function NotificationBell() {
   async function handleOpen() {
     setShowDropdown(!showDropdown);
     if (!showDropdown && unreadCount > 0) {
-      // Mark all as read
       await fetch('/api/notifications', { method: 'PATCH' });
       setUnreadCount(0);
+    }
+  }
+
+  async function handleGroupInvite(inviteId: string, action: 'accepted' | 'declined') {
+    setRespondingId(inviteId);
+    try {
+      const res = await fetch('/api/groups/invites/respond', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inviteId, action }),
+      });
+      if (res.ok) {
+        setRespondedIds(prev => new Set(prev).add(inviteId));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setRespondingId(null);
     }
   }
 
@@ -90,18 +110,46 @@ export default function NotificationBell() {
               No notifications yet
             </div>
           ) : (
-            notifications.slice(0, 8).map((n) => (
-              <div
-                key={n.id}
-                className={`px-4 py-3 border-b border-border-main/50 ${!n.read ? 'bg-accent-green/5' : ''}`}
-              >
-                <div className="text-sm font-medium text-text-primary">{n.title}</div>
-                <div className="text-xs text-text-secondary mt-0.5">{n.body}</div>
-                <div className="text-[10px] text-text-secondary mt-1">
-                  {new Date(n.createdAt).toLocaleDateString()}
+            notifications.slice(0, 8).map((n) => {
+              const inviteId = n.data?.inviteId;
+              const isGroupInvite = n.type === 'group_invite' && inviteId;
+              const alreadyResponded = inviteId ? respondedIds.has(inviteId) : false;
+
+              return (
+                <div
+                  key={n.id}
+                  className={`px-4 py-3 border-b border-border-main/50 ${!n.read ? 'bg-accent-green/5' : ''}`}
+                >
+                  <div className="text-sm font-medium text-text-primary">{n.title}</div>
+                  <div className="text-xs text-text-secondary mt-0.5">{n.body}</div>
+                  <div className="text-[10px] text-text-secondary mt-1">
+                    {new Date(n.createdAt).toLocaleDateString()}
+                  </div>
+
+                  {isGroupInvite && !alreadyResponded && (
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => handleGroupInvite(inviteId, 'accepted')}
+                        disabled={respondingId === inviteId}
+                        className="px-2.5 py-0.5 rounded-md bg-accent-green text-white text-xs font-medium disabled:opacity-50"
+                      >
+                        Join
+                      </button>
+                      <button
+                        onClick={() => handleGroupInvite(inviteId, 'declined')}
+                        disabled={respondingId === inviteId}
+                        className="px-2.5 py-0.5 rounded-md bg-bg-primary border border-border-main text-text-secondary text-xs disabled:opacity-50"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  )}
+                  {isGroupInvite && alreadyResponded && (
+                    <div className="text-[10px] text-accent-green mt-1">Responded</div>
+                  )}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
