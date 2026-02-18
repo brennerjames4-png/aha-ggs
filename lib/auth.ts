@@ -18,16 +18,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     signIn: '/login',
   },
   callbacks: {
-    async jwt({ token, account, profile }) {
-      // On first sign-in, look up the user
+    async jwt({ token, account, profile, trigger }) {
+      // On first sign-in, capture Google profile info
       if (account && profile) {
         token.googleId = profile.sub || '';
         token.name = profile.name;
         token.picture = profile.picture;
         token.email = profile.email;
+      }
 
-        // Check if user exists in our system
-        const user = await getUserByGoogleId(profile.sub!);
+      // Re-check user in DB when not yet onboarded or on session update
+      // This handles the case where onboarding completes and session.update() is called
+      if (token.googleId && (!token.onboarded || trigger === 'update')) {
+        const user = await getUserByGoogleId(token.googleId);
         if (user) {
           token.userId = user.id;
           token.username = user.username;
@@ -38,6 +41,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           token.onboarded = false;
         }
       }
+
       return token;
     },
     async session({ session, token }) {
