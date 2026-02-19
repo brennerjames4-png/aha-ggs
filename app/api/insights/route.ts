@@ -28,6 +28,71 @@ export async function GET() {
   });
 }
 
+// Search for a relevant image using free APIs (Wikimedia Commons + Unsplash)
+async function findImage(query: string): Promise<{ url: string; caption: string } | null> {
+  // Try 1: Unsplash (free, no API key needed for source URLs)
+  try {
+    const unsplashRes = await fetch(
+      `https://unsplash.com/napi/search/photos?query=${encodeURIComponent(query)}&per_page=1`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+    if (unsplashRes.ok) {
+      const data = await unsplashRes.json();
+      if (data.results?.[0]) {
+        const photo = data.results[0];
+        return {
+          url: photo.urls?.regular || photo.urls?.small,
+          caption: photo.description || photo.alt_description || query,
+        };
+      }
+    }
+  } catch {}
+
+  // Try 2: Wikimedia Commons
+  try {
+    const wikiRes = await fetch(
+      `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrnamespace=6&gsrlimit=3&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`
+    );
+    if (wikiRes.ok) {
+      const data = await wikiRes.json();
+      const pages = data.query?.pages;
+      if (pages) {
+        const page = Object.values(pages)[0] as any;
+        const info = page?.imageinfo?.[0];
+        if (info?.thumburl || info?.url) {
+          return {
+            url: info.thumburl || info.url,
+            caption: info.extmetadata?.ImageDescription?.value?.replace(/<[^>]*>/g, '') || query,
+          };
+        }
+      }
+    }
+  } catch {}
+
+  // Try 3: Wikipedia page images for the country/region
+  try {
+    // Extract a likely country/place name from the query
+    const wikiPageRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&prop=pageimages&piprop=original&format=json&origin=*`
+    );
+    if (wikiPageRes.ok) {
+      const data = await wikiPageRes.json();
+      const pages = data.query?.pages;
+      if (pages) {
+        const page = Object.values(pages)[0] as any;
+        if (page?.original?.source) {
+          return {
+            url: page.original.source,
+            caption: page.title || query,
+          };
+        }
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
 // POST — generate today's insight (OG members only, idempotent)
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -84,14 +149,18 @@ Respond in this exact JSON format (no markdown wrapping):
 {
   "title": "Short catchy title (max 60 chars)",
   "body": "2-3 paragraphs of detailed, specific, actionable advice. Use specific examples. Include the country/region name. Mention what exactly to look for and why it's a reliable indicator. Keep it engaging and educational.",
-  "imageSearchQuery": "A very specific Google Image search query that would find a good example photo of the clue described (e.g. 'bollards red white striped Netherlands road' or 'Japanese road markings diamond pattern')"
-}`,
+  "imageSearchTerms": ["term1", "term2", "term3"],
+  "imageCountry": "The main country or region the insight is about (e.g. 'Finland', 'Southeast Asia', 'Andes mountains')"
+}
+
+For imageSearchTerms, provide 3 different search queries that would find a good reference photo. Be specific — e.g. ["Finland road bollard yellow", "Finnish highway delineator post", "Finland road marker winter"]. These will be searched on Wikimedia Commons and Unsplash.
+For imageCountry, provide the primary country or region name so we can find a representative photo.`,
     }],
   });
 
   // Parse the response
   const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
-  let parsed: { title: string; body: string; imageSearchQuery: string };
+  let parsed: { title: string; body: string; imageSearchTerms: string[]; imageCountry: string };
   try {
     parsed = JSON.parse(responseText);
   } catch {
@@ -104,28 +173,23 @@ Respond in this exact JSON format (no markdown wrapping):
     }
   }
 
-  // Search for an image using Google
+  // Search for an image using multiple search terms
   let imageUrl: string | null = null;
   let imageCaption: string | null = null;
-  try {
-    const searchQuery = encodeURIComponent(parsed.imageSearchQuery + ' GeoGuessr clue');
-    const googleApiKey = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
-    const searchEngineId = process.env.GOOGLE_CUSTOM_SEARCH_ENGINE_ID;
 
-    if (googleApiKey && searchEngineId) {
-      const searchRes = await fetch(
-        `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${searchEngineId}&q=${searchQuery}&searchType=image&num=1&safe=active`
-      );
-      if (searchRes.ok) {
-        const searchData = await searchRes.json();
-        if (searchData.items?.[0]) {
-          imageUrl = searchData.items[0].link;
-          imageCaption = searchData.items[0].title || parsed.imageSearchQuery;
-        }
-      }
+  const searchTerms = [
+    ...(parsed.imageSearchTerms || []),
+    parsed.imageCountry + ' street view',
+    parsed.imageCountry + ' road',
+  ];
+
+  for (const term of searchTerms) {
+    const result = await findImage(term);
+    if (result) {
+      imageUrl = result.url;
+      imageCaption = result.caption;
+      break;
     }
-  } catch {
-    // Image search is optional — continue without image
   }
 
   // Save the insight
