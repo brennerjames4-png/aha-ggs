@@ -106,7 +106,18 @@ export type NotificationType =
   | 'friend_accepted'
   | 'group_invite'
   | 'scores_revealed'
-  | 'legacy_claimed';
+  | 'legacy_claimed'
+  | 'daily_insight';
+
+// === Daily Insights (OG-only) ===
+export interface DailyInsight {
+  date: string; // YYYY-MM-DD
+  title: string;
+  body: string; // markdown-formatted insight content
+  imageUrl: string | null; // Google Images URL for visual reference
+  imageCaption: string | null;
+  createdAt: string; // ISO date
+}
 
 export interface Notification {
   id: string;

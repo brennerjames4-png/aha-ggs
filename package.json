@@ -10,6 +10,7 @@
     "migrate": "tsx scripts/migrate-v2.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.77.0",
     "@types/bcryptjs": "^2.4.6",
     "@upstash/redis": "^1.36.2",
     "bcryptjs": "^3.0.3",

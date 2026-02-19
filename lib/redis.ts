@@ -3,7 +3,7 @@ import {
   UserId, GroupId, UserProfile, Group, GroupSettings,
   DailyScore, FriendRequest, FriendRequestStatus,
   GroupInvite, GroupInviteStatus, Notification, NotificationType,
-  ClaimCode, MemberInfo, LEGACY_IDS,
+  ClaimCode, MemberInfo, LEGACY_IDS, DailyInsight,
 } from './types';
 
 // === Singleton Redis Client ===
@@ -800,4 +800,63 @@ export async function addReservedUsername(username: string): Promise<void> {
 
 export function getRawRedis(): Redis {
   return getRedis();
+}
+
+// ============================================================
+// DAILY INSIGHTS (OG-only)
+// ============================================================
+
+export async function saveDailyInsight(insight: DailyInsight): Promise<void> {
+  const redis = getRedis();
+  const pipeline = redis.pipeline();
+  // Store the insight by date
+  pipeline.set(`insight:${insight.date}`, JSON.stringify(insight));
+  // Add to the sorted list of insight dates (for pagination/listing)
+  pipeline.zadd('insights:dates', { score: new Date(insight.date).getTime(), member: insight.date });
+  await pipeline.exec();
+}
+
+export async function getDailyInsight(date: string): Promise<DailyInsight | null> {
+  const redis = getRedis();
+  const data = await redis.get<string>(`insight:${date}`);
+  return parseJson<DailyInsight>(data);
+}
+
+export async function getAllInsights(): Promise<DailyInsight[]> {
+  const redis = getRedis();
+  // Get all insight dates, most recent first
+  const dates = await redis.zrange('insights:dates', 0, -1, { rev: true });
+  if (!dates || dates.length === 0) return [];
+
+  const pipeline = redis.pipeline();
+  for (const date of dates) {
+    pipeline.get(`insight:${date}`);
+  }
+  const results = await pipeline.exec();
+
+  const insights: DailyInsight[] = [];
+  for (const data of results) {
+    const insight = parseJson<DailyInsight>(data);
+    if (insight) insights.push(insight);
+  }
+  return insights;
+}
+
+export async function getAllInsightBodies(): Promise<string[]> {
+  const redis = getRedis();
+  const dates = await redis.zrange('insights:dates', 0, -1);
+  if (!dates || dates.length === 0) return [];
+
+  const pipeline = redis.pipeline();
+  for (const date of dates) {
+    pipeline.get(`insight:${date}`);
+  }
+  const results = await pipeline.exec();
+
+  const bodies: string[] = [];
+  for (const data of results) {
+    const insight = parseJson<DailyInsight>(data);
+    if (insight) bodies.push(insight.title + ': ' + insight.body);
+  }
+  return bodies;
 }
