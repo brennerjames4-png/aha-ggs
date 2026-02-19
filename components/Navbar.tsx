@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { signOut } from 'next-auth/react';
 import NotificationBell from './NotificationBell';
 
@@ -17,23 +17,6 @@ export default function Navbar({ user }: { user: NavbarUser | null }) {
   const router = useRouter();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [isOgMember, setIsOgMember] = useState(false);
-
-  // Check if user is in OG group
-  useEffect(() => {
-    if (!user?.onboarded) return;
-    async function checkOg() {
-      try {
-        const res = await fetch('/api/groups');
-        if (res.ok) {
-          const data = await res.json();
-          const og = data.groups?.some((g: any) => g.isOriginal);
-          setIsOgMember(!!og);
-        }
-      } catch {}
-    }
-    checkOg();
-  }, [user?.onboarded]);
 
   const links = [
     { href: '/', label: 'Dashboard', icon: '🏠' },
@@ -41,10 +24,6 @@ export default function Navbar({ user }: { user: NavbarUser | null }) {
     { href: '/groups', label: 'Groups', icon: '👥' },
     { href: '/friends', label: 'Friends', icon: '🤝' },
   ];
-
-  if (isOgMember) {
-    links.push({ href: '/insights', label: 'Insights', icon: '🔮' });
-  }
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border-main bg-bg-secondary/90 backdrop-blur-md">
