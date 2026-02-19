@@ -85,7 +85,7 @@ export default function FriendsPage() {
         <h1 className="text-2xl font-bold text-text-primary">Friends</h1>
 
         {/* Add friend search */}
-        <div className="glass-card p-4">
+        <div className="glass-card p-4 relative z-20 overflow-visible">
           <h2 className="text-sm font-medium text-text-secondary mb-2">Add Friends</h2>
           <UserSearch
             onSelect={handleAddFriend}

@@ -136,7 +136,7 @@ export default function GroupSettings() {
         </div>
 
         {/* Invite */}
-        <div className="glass-card p-4 space-y-3">
+        <div className="glass-card p-4 space-y-3 relative z-20 overflow-visible">
           <h2 className="text-sm font-medium text-text-secondary">Invite Friends</h2>
           <UserSearch
             onSelect={handleInvite}

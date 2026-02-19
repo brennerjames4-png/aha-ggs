@@ -67,7 +67,7 @@ export default function CreateGroupPage() {
         <BackButton href="/groups" label="Groups" />
         <h1 className="text-2xl font-bold text-text-primary">Create a Group</h1>
 
-        <form onSubmit={handleCreate} className="glass-card p-6 space-y-5">
+        <form onSubmit={handleCreate} className="glass-card p-6 space-y-5 overflow-visible">
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">
               Group Name
@@ -83,7 +83,7 @@ export default function CreateGroupPage() {
             />
           </div>
 
-          <div>
+          <div className="relative z-20">
             <label className="block text-sm font-medium text-text-secondary mb-1.5">
               Invite Friends (optional)
             </label>
