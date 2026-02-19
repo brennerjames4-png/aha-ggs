@@ -48,22 +48,23 @@ async function findImage(query: string): Promise<{ url: string; caption: string 
     }
   } catch {}
 
-  // Try 2: Wikimedia Commons
+  // Try 2: Wikimedia Commons (filter for actual images only, not PDFs/SVGs)
   try {
     const wikiRes = await fetch(
-      `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrnamespace=6&gsrlimit=3&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`
+      `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrnamespace=6&gsrlimit=5&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=800&format=json&origin=*`
     );
     if (wikiRes.ok) {
       const data = await wikiRes.json();
       const pages = data.query?.pages;
       if (pages) {
-        const page = Object.values(pages)[0] as any;
-        const info = page?.imageinfo?.[0];
-        if (info?.thumburl || info?.url) {
-          return {
-            url: info.thumburl || info.url,
-            caption: info.extmetadata?.ImageDescription?.value?.replace(/<[^>]*>/g, '') || query,
-          };
+        for (const page of Object.values(pages) as any[]) {
+          const info = page?.imageinfo?.[0];
+          if (info?.mime && (info.mime === 'image/jpeg' || info.mime === 'image/png')) {
+            return {
+              url: info.thumburl || info.url,
+              caption: (info.extmetadata?.ImageDescription?.value?.replace(/<[^>]*>/g, '') || query).substring(0, 120),
+            };
+          }
         }
       }
     }
