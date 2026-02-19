@@ -42,7 +42,9 @@ export async function createUser(profile: UserProfile): Promise<void> {
   const redis = getRedis();
   const pipeline = redis.pipeline();
   pipeline.set(`user:${profile.id}`, JSON.stringify(profile));
-  pipeline.set(`user:google:${profile.googleId}`, profile.id);
+  if (profile.googleId) {
+    pipeline.set(`user:google:${profile.googleId}`, profile.id);
+  }
   pipeline.set(`user:username:${profile.username.toLowerCase()}`, profile.id);
   for (const gid of profile.groups) {
     pipeline.sadd(`user:groups:${profile.id}`, gid);
@@ -152,6 +154,16 @@ export async function isUsernameTaken(username: string): Promise<boolean> {
   const redis = getRedis();
   const exists = await redis.exists(`user:username:${username.toLowerCase()}`);
   return exists === 1;
+}
+
+export async function setUserPassword(userId: UserId, hashedPassword: string): Promise<void> {
+  const redis = getRedis();
+  await redis.set(`user:password:${userId}`, hashedPassword);
+}
+
+export async function getUserPassword(userId: UserId): Promise<string | null> {
+  const redis = getRedis();
+  return await redis.get<string>(`user:password:${userId}`);
 }
 
 // ============================================================

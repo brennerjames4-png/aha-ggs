@@ -9,11 +9,13 @@ export default auth((req) => {
   // Public paths — always accessible
   const isPublicPath =
     pathname === '/login' ||
-    pathname.startsWith('/api/auth');
+    pathname === '/signup' ||
+    pathname.startsWith('/api/auth') ||
+    pathname === '/api/users/search';
 
   if (isPublicPath) {
     // If logged in and on login page, redirect to dashboard or onboarding
-    if (isLoggedIn && pathname === '/login') {
+    if (isLoggedIn && (pathname === '/login' || pathname === '/signup')) {
       const dest = isOnboarded ? '/' : '/onboarding';
       return NextResponse.redirect(new URL(dest, req.url));
     }

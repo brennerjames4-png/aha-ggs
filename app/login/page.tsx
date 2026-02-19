@@ -1,9 +1,38 @@
 'use client';
 
+import { useState } from 'react';
 import { signIn } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import Link from 'next/link';
 
 export default function LoginPage() {
+  const router = useRouter();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function handleCredentials(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    const result = await signIn('credentials', {
+      username,
+      password,
+      redirect: false,
+    });
+
+    if (result?.error) {
+      setError('Invalid username or password');
+      setLoading(false);
+      return;
+    }
+
+    router.push('/');
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 map-grid">
       <motion.div
@@ -32,14 +61,43 @@ export default function LoginPage() {
         </div>
 
         {/* Sign in card */}
-        <div className="glass-card p-6 space-y-5">
-          <p className="text-center text-text-secondary text-sm">
-            Sign in to track your daily GeoGuessr scores
-          </p>
+        <div className="glass-card p-6 space-y-4">
+          <form onSubmit={handleCredentials} className="space-y-3">
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+              placeholder="Username"
+              className="w-full px-4 py-2.5 rounded-xl bg-bg-primary border border-border-main text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-accent-green/50 focus:border-accent-green transition-all"
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              className="w-full px-4 py-2.5 rounded-xl bg-bg-primary border border-border-main text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-2 focus:ring-accent-green/50 focus:border-accent-green transition-all"
+            />
+            {error && (
+              <p className="text-sm text-accent-red text-center">{error}</p>
+            )}
+            <button
+              type="submit"
+              disabled={loading || !username || !password}
+              className="w-full py-2.5 rounded-xl bg-accent-green text-white font-semibold hover:bg-accent-green/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
+
+          <div className="relative flex items-center gap-3">
+            <div className="flex-1 h-px bg-border-main" />
+            <span className="text-xs text-text-secondary">or</span>
+            <div className="flex-1 h-px bg-border-main" />
+          </div>
 
           <button
             onClick={() => signIn('google', { callbackUrl: '/' })}
-            className="w-full py-3 px-4 rounded-xl bg-white text-gray-800 font-semibold hover:bg-gray-100 transition-all flex items-center justify-center gap-3 shadow-sm"
+            className="w-full py-2.5 px-4 rounded-xl bg-white text-gray-800 font-semibold hover:bg-gray-100 transition-all flex items-center justify-center gap-3 shadow-sm"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path
@@ -63,7 +121,14 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <p className="text-center text-xs text-text-secondary mt-6">
+        <p className="text-center text-sm text-text-secondary mt-4">
+          Don&apos;t have an account?{' '}
+          <Link href="/signup" className="text-accent-green hover:underline">
+            Sign up
+          </Link>
+        </p>
+
+        <p className="text-center text-xs text-text-secondary mt-2">
           Globe-trotting glory awaits
         </p>
       </motion.div>
